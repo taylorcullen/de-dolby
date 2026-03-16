@@ -10,7 +10,7 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import configure, require_tools
+from de_dolby.tools import configure, configure_timeout, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -76,6 +76,8 @@ def main() -> None:
     p_convert.add_argument("--bitrate", help="Target bitrate for hevc_amf, e.g. 40M")
     p_convert.add_argument("--sample", type=int, nargs="?", const=30, metavar="SECONDS",
                            help="Convert only the first N seconds for testing (default: 30)")
+    p_convert.add_argument("--timeout", type=int, metavar="MINUTES",
+                           help="Timeout per subprocess call in minutes (default: none)")
     p_convert.add_argument("--dry-run", action="store_true", help="Print steps without executing")
     p_convert.add_argument("-v", "--verbose", action="store_true", help="Show detailed output")
     p_convert.add_argument("--force", action="store_true", help="Overwrite output if exists")
@@ -163,6 +165,9 @@ def _cmd_convert(args: argparse.Namespace) -> None:
         print("Error: -o/--output cannot be used with multiple input files.",
               file=sys.stderr)
         sys.exit(1)
+
+    if hasattr(args, "timeout") and args.timeout:
+        configure_timeout(args.timeout)
 
     options = ConvertOptions(
         encoder=args.encoder,

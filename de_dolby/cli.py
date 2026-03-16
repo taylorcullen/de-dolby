@@ -5,6 +5,7 @@ import glob
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from de_dolby import __version__
@@ -212,11 +213,21 @@ def _cmd_convert(args: argparse.Namespace) -> None:
     )
 
     errors: list[str] = []
+    batch_start = time.monotonic()
 
     for idx, input_path in enumerate(input_files, 1):
         if multiple:
+            elapsed = time.monotonic() - batch_start
+            if idx > 1 and elapsed > 0:
+                avg = elapsed / (idx - 1)
+                remaining = avg * (len(input_files) - idx + 1)
+                m, s = divmod(int(remaining), 60)
+                h, m = divmod(m, 60)
+                eta = f"  ETA: {h}:{m:02d}:{s:02d}" if h else f"  ETA: {m}:{s:02d}"
+            else:
+                eta = ""
             print(f"\n{'=' * 60}")
-            print(f"[{idx}/{len(input_files)}] {Path(input_path).name}")
+            print(f"[{idx}/{len(input_files)}] {Path(input_path).name}{eta}")
             print(f"{'=' * 60}")
 
         if not Path(input_path).exists():
@@ -245,8 +256,17 @@ def _cmd_convert(args: argparse.Namespace) -> None:
             print("\n\nInterrupted.", file=sys.stderr)
             sys.exit(130)
 
+    if multiple:
+        elapsed = time.monotonic() - batch_start
+        m, s = divmod(int(elapsed), 60)
+        h, m = divmod(m, 60)
+        time_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        succeeded = len(input_files) - len(errors)
+        print(f"\nBatch complete: {succeeded}/{len(input_files)} succeeded in {time_str}",
+              file=sys.stderr)
+
     if multiple and errors:
-        print(f"\n{len(errors)} file(s) failed:", file=sys.stderr)
+        print(f"{len(errors)} file(s) failed:", file=sys.stderr)
         for err in errors:
             print(f"  - {err}", file=sys.stderr)
         sys.exit(1)

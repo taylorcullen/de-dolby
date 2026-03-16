@@ -1,6 +1,8 @@
 """Conversion pipelines: lossless strip (Profile 7/8) and re-encode (Profile 5)."""
 
 import os
+import shutil
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +68,9 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
                    sample_seconds=options.sample_seconds)
 
     set_verbose(options.verbose)
+
+    if not options.dry_run:
+        _check_disk_space(info, options)
 
     if info.dv_profile in (7, 8):
         _pipeline_lossless(info, output_path, options)
@@ -393,6 +398,36 @@ def _build_encode_cmd(input_path: str, output_path: str, encoder: str,
 
     cmd.append(output_path)
     return cmd
+
+
+def _check_disk_space(info: FileInfo, options: ConvertOptions) -> None:
+    """Warn if temp directory doesn't have enough space for intermediate files.
+
+    Estimates ~2x the source file size for intermediate HEVC + RPU + clean HEVC.
+    For sample mode, scales by the sample fraction.
+    """
+    if not info.overall_bitrate or not info.duration:
+        return
+
+    duration = options.sample_seconds or info.duration
+    source_bytes = (info.overall_bitrate * duration) / 8
+    # Lossless needs ~2x (extracted HEVC + clean HEVC), re-encode needs ~3x
+    estimated_bytes = int(source_bytes * 3)
+
+    temp_dir = options.temp_dir or tempfile.gettempdir()
+    try:
+        usage = shutil.disk_usage(temp_dir)
+    except OSError:
+        return
+
+    if usage.free < estimated_bytes:
+        free_str = _format_bytes(usage.free)
+        need_str = _format_bytes(estimated_bytes)
+        print(f"Warning: temp directory may not have enough space "
+              f"(free: {free_str}, estimated need: {need_str})",
+              file=sys.stderr)
+        print(f"  Use --temp-dir to specify a directory with more space.",
+              file=sys.stderr)
 
 
 def _cleanup_temp(tmp_dir: str) -> None:

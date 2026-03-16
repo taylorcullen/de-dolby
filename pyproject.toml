@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "de-dolby"
+version = "0.1.0"
+description = "Convert Dolby Vision MKV files to HDR10"
+requires-python = ">=3.10"
+
+[project.scripts]
+de-dolby = "de_dolby.cli:main"

@@ -14,6 +14,7 @@ from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
 from de_dolby.codecs import ENCODERS
 from de_dolby.tools import check_encoder_available, configure, configure_log_file, configure_timeout, require_tools
+from de_dolby.utils import format_duration
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -225,9 +226,7 @@ def _cmd_convert(args: argparse.Namespace) -> None:
             if idx > 1 and elapsed > 0:
                 avg = elapsed / (idx - 1)
                 remaining = avg * (len(input_files) - idx + 1)
-                m, s = divmod(int(remaining), 60)
-                h, m = divmod(m, 60)
-                eta = f"  ETA: {h}:{m:02d}:{s:02d}" if h else f"  ETA: {m}:{s:02d}"
+                eta = f"  ETA: {format_duration(remaining)}"
             else:
                 eta = ""
             print(f"\n{'=' * 60}")
@@ -262,9 +261,7 @@ def _cmd_convert(args: argparse.Namespace) -> None:
 
     if multiple:
         elapsed = time.monotonic() - batch_start
-        m, s = divmod(int(elapsed), 60)
-        h, m = divmod(m, 60)
-        time_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        time_str = format_duration(elapsed)
         succeeded = len(input_files) - len(errors)
         print(f"\nBatch complete: {succeeded}/{len(input_files)} succeeded in {time_str}",
               file=sys.stderr)

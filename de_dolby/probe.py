@@ -88,18 +88,7 @@ def probe(path: str) -> FileInfo:
             if si.color_transfer == "smpte2084" and si.color_primaries == "bt2020":
                 info.has_hdr10 = True
 
-            # Check side data for DV config and HDR10 metadata
-            for sd in s.get("side_data_list", []):
-                if sd.get("side_data_type") == "DOVI configuration record":
-                    info.dv_profile = sd.get("dv_profile")
-                    info.dv_bl_signal_compatibility_id = sd.get("dv_bl_signal_compatibility_id")
-                elif sd.get("side_data_type") == "Mastering display metadata":
-                    info.master_display = _parse_ffprobe_master_display(sd)
-                elif sd.get("side_data_type") == "Content light level metadata":
-                    max_cll = sd.get("max_content", 0)
-                    max_fall = sd.get("max_average", 0)
-                    if max_cll or max_fall:
-                        info.content_light_level = f"{max_cll},{max_fall}"
+            _extract_side_data(s.get("side_data_list", []), info)
 
             info.video_streams.append(si)
         elif codec_type == "audio":
@@ -108,21 +97,37 @@ def probe(path: str) -> FileInfo:
         elif codec_type == "subtitle":
             info.subtitle_streams.append(si)
 
-    # Also check frames for DV side data and HDR10 metadata (more reliable for some files)
+    # Also check frames for side data (more reliable for some files)
     for frame in data.get("frames", []):
-        for sd in frame.get("side_data_list", []):
-            if sd.get("side_data_type") == "DOVI configuration record" and info.dv_profile is None:
+        _extract_side_data(frame.get("side_data_list", []), info, overwrite=False)
+
+    return info
+
+
+def _extract_side_data(sd_list: list[dict], info: FileInfo, overwrite: bool = True) -> None:
+    """Process a list of side data entries, populating DV and HDR10 fields on info.
+
+    When overwrite=False, only fills in fields that are still None (used for
+    frame-level fallback after stream-level has been processed).
+    """
+    for sd in sd_list:
+        sd_type = sd.get("side_data_type")
+
+        if sd_type == "DOVI configuration record":
+            if overwrite or info.dv_profile is None:
                 info.dv_profile = sd.get("dv_profile")
                 info.dv_bl_signal_compatibility_id = sd.get("dv_bl_signal_compatibility_id")
-            elif sd.get("side_data_type") == "Mastering display metadata" and info.master_display is None:
+
+        elif sd_type == "Mastering display metadata":
+            if overwrite or info.master_display is None:
                 info.master_display = _parse_ffprobe_master_display(sd)
-            elif sd.get("side_data_type") == "Content light level metadata" and info.content_light_level is None:
+
+        elif sd_type == "Content light level metadata":
+            if overwrite or info.content_light_level is None:
                 max_cll = sd.get("max_content", 0)
                 max_fall = sd.get("max_average", 0)
                 if max_cll or max_fall:
                     info.content_light_level = f"{max_cll},{max_fall}"
-
-    return info
 
 
 def _parse_rational(val: str) -> float:

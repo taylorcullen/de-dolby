@@ -4,7 +4,8 @@ import pytest
 from unittest.mock import patch
 
 from de_dolby.codecs import get_encoder
-from de_dolby.pipeline import ConvertOptions, _format_bytes, _build_encode_cmd, _check_disk_space
+from de_dolby.pipeline import ConvertOptions, _build_encode_cmd, _check_disk_space
+from de_dolby.utils import format_bytes
 from de_dolby.metadata import HDR10Metadata
 from de_dolby.probe import FileInfo, StreamInfo
 from de_dolby.config import DEFAULT_MASTER_DISPLAY
@@ -29,10 +30,10 @@ def test_convert_options_temp_dir():
 
 
 def test_format_bytes():
-    assert _format_bytes(500) == "500.0 B"
-    assert _format_bytes(1024) == "1.0 KB"
-    assert _format_bytes(1024 * 1024) == "1.0 MB"
-    assert _format_bytes(1024 * 1024 * 1024) == "1.0 GB"
+    assert format_bytes(500) == "500.0 B"
+    assert format_bytes(1024) == "1.0 KB"
+    assert format_bytes(1024 * 1024) == "1.0 MB"
+    assert format_bytes(1024 * 1024 * 1024) == "1.0 GB"
 
 
 def test_build_encode_cmd_libx265():

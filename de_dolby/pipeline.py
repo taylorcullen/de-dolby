@@ -14,7 +14,7 @@ from de_dolby.progress import (
     run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
-    check_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge,
+    check_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
 
 
@@ -63,6 +63,8 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
 
     display_banner(info, output_path, encoder_name, mode_str,
                    sample_seconds=options.sample_seconds)
+
+    set_verbose(options.verbose)
 
     if info.dv_profile in (7, 8):
         _pipeline_lossless(info, output_path, options)
@@ -234,8 +236,6 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
                 source_bitrate=info.video_streams[0].bitrate if info.video_streams else None,
                 dv_profile5=True,
             )
-            if options.verbose:
-                print(f"    cmd: {' '.join(ffmpeg_cmd)}")
             run_ffmpeg_with_progress(ffmpeg_cmd, encode_duration, progress)
         progress.complete_step()
 

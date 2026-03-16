@@ -62,14 +62,14 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
         mode_str = "Lossless RPU strip (no re-encode)"
         encoder_name = "copy"
     elif info.dv_profile in (7, 8, 10) and needs_reencode:
-        codec_label = "AV1" if is_av1_encoder else "HEVC"
-        mode_str = f"Re-encode to {codec_label} (Profile {info.dv_profile})"
         encoder_name = options.encoder
         if encoder_name == "auto":
             if is_av1_input:
                 encoder_name = "av1_amf" if check_av1_amf_support() else "libsvtav1"
             else:
                 encoder_name = "hevc_amf" if check_amf_support() else "libx265"
+        codec_label = "AV1" if encoder_name in ("av1_amf", "libsvtav1") else "HEVC"
+        mode_str = f"Re-encode to {codec_label} (Profile {info.dv_profile})"
     elif info.dv_profile == 5:
         mode_str = "Re-encode (Profile 5 color conversion)"
         encoder_name = options.encoder
@@ -100,7 +100,7 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
 def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions) -> None:
     """Profile 7/8/10: strip DV RPU without re-encoding."""
     is_av1_input = info.video_streams[0].codec_name == "av1"
-    ext = ".obu" if is_av1_input else ".hevc"
+    ext = ".ivf" if is_av1_input else ".hevc"
 
     progress = ProgressReporter(STEPS_LOSSLESS, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
@@ -224,7 +224,7 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
 
     progress = ProgressReporter(STEPS_REENCODE, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
-    raw_ext = ".obu" if is_av1_input else ".hevc"
+    raw_ext = ".ivf" if is_av1_input else ".hevc"
     raw_path = os.path.join(tmp_dir, f"video{raw_ext}")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
     audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")

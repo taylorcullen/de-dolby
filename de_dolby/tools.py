@@ -39,6 +39,15 @@ def configure(*, ffmpeg: str | None = None, dovi_tool: str | None = None,
         _paths.mkvmerge = mkvmerge
 
 
+_timeout_seconds: int | None = None
+
+
+def configure_timeout(minutes: int | None) -> None:
+    """Set the global subprocess timeout (in minutes). None means no timeout."""
+    global _timeout_seconds
+    _timeout_seconds = minutes * 60 if minutes else None
+
+
 def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
          stdin_data: bytes | None = None, pipe_stdin: bool = False) -> subprocess.CompletedProcess:
     if _verbose:
@@ -46,10 +55,15 @@ def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
     stdin = subprocess.PIPE if (stdin_data is not None or pipe_stdin) else None
     stdout = subprocess.PIPE if capture else None
     stderr = subprocess.PIPE
-    result = subprocess.run(
-        cmd, stdin=stdin, stdout=stdout, stderr=stderr,
-        input=stdin_data, check=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd, stdin=stdin, stdout=stdout, stderr=stderr,
+            input=stdin_data, check=False, timeout=_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Command timed out after {_timeout_seconds}s: {' '.join(cmd)}"
+        )
     if check and result.returncode != 0:
         err = result.stderr.decode(errors="replace") if result.stderr else ""
         out = result.stdout.decode(errors="replace") if result.stdout else ""

@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import os
 import re
 import sys
 from pathlib import Path
@@ -76,6 +77,7 @@ def main() -> None:
     p_convert.add_argument("--bitrate", help="Target bitrate for hevc_amf, e.g. 40M")
     p_convert.add_argument("--sample", type=int, nargs="?", const=30, metavar="SECONDS",
                            help="Convert only the first N seconds for testing (default: 30)")
+    p_convert.add_argument("--temp-dir", help="Directory for intermediate files (default: system temp)")
     p_convert.add_argument("--dry-run", action="store_true", help="Print steps without executing")
     p_convert.add_argument("-v", "--verbose", action="store_true", help="Show detailed output")
     p_convert.add_argument("--force", action="store_true", help="Overwrite output if exists")
@@ -172,12 +174,23 @@ def _cmd_convert(args: argparse.Namespace) -> None:
         print("Error: --sample must be a positive number of seconds", file=sys.stderr)
         sys.exit(2)
 
+    # Validate --temp-dir if provided
+    if args.temp_dir:
+        td = Path(args.temp_dir)
+        if not td.is_dir():
+            print(f"Error: --temp-dir does not exist: {args.temp_dir}", file=sys.stderr)
+            sys.exit(1)
+        if not os.access(args.temp_dir, os.W_OK):
+            print(f"Error: --temp-dir is not writable: {args.temp_dir}", file=sys.stderr)
+            sys.exit(1)
+
     options = ConvertOptions(
         encoder=args.encoder,
         quality=args.quality,
         crf=args.crf,
         bitrate=args.bitrate,
         sample_seconds=args.sample,
+        temp_dir=args.temp_dir,
         dry_run=args.dry_run,
         verbose=args.verbose,
         force=args.force,

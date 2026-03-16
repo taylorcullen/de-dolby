@@ -25,6 +25,7 @@ class ConvertOptions:
     crf: int | None = None
     bitrate: str | None = None
     sample_seconds: int | None = None  # convert only first N seconds
+    temp_dir: str | None = None  # custom temp directory for intermediate files
     dry_run: bool = False
     verbose: bool = False
     force: bool = False
@@ -75,7 +76,7 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
 def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions) -> None:
     """Profile 7/8: strip DV RPU without re-encoding."""
     progress = ProgressReporter(STEPS_LOSSLESS, verbose=options.verbose)
-    tmp_dir = tempfile.mkdtemp(prefix="de_dolby_")
+    tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
     hevc_path = os.path.join(tmp_dir, "video.hevc")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
     clean_hevc_path = os.path.join(tmp_dir, "clean.hevc")
@@ -165,7 +166,7 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
                        resolved_encoder: str | None = None) -> None:
     """Profile 5: re-encode with color space conversion."""
     progress = ProgressReporter(STEPS_REENCODE, verbose=options.verbose)
-    tmp_dir = tempfile.mkdtemp(prefix="de_dolby_")
+    tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
     hevc_path = os.path.join(tmp_dir, "video.hevc")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
     encoded_hevc_path = os.path.join(tmp_dir, "encoded.hevc")

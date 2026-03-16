@@ -11,7 +11,7 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import configure, configure_timeout, require_tools
+from de_dolby.tools import check_amf_support, configure, configure_timeout, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -188,6 +188,12 @@ def _cmd_convert(args: argparse.Namespace) -> None:
 
     if hasattr(args, "timeout") and args.timeout:
         configure_timeout(args.timeout)
+
+    # Fail fast: check encoder availability before processing any files
+    if args.encoder == "hevc_amf" and not check_amf_support():
+        print("Error: hevc_amf encoder not available. "
+              "Use --encoder libx265 for CPU encoding.", file=sys.stderr)
+        sys.exit(1)
 
     options = ConvertOptions(
         encoder=args.encoder,

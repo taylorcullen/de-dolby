@@ -10,7 +10,7 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import configure, require_tools
+from de_dolby.tools import check_amf_support, configure, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -162,6 +162,12 @@ def _cmd_convert(args: argparse.Namespace) -> None:
     if args.output and multiple:
         print("Error: -o/--output cannot be used with multiple input files.",
               file=sys.stderr)
+        sys.exit(1)
+
+    # Fail fast: check encoder availability before processing any files
+    if args.encoder == "hevc_amf" and not check_amf_support():
+        print("Error: hevc_amf encoder not available. "
+              "Use --encoder libx265 for CPU encoding.", file=sys.stderr)
         sys.exit(1)
 
     options = ConvertOptions(

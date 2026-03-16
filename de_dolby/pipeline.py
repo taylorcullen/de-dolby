@@ -9,6 +9,7 @@ from pathlib import Path
 
 from de_dolby.codecs import Encoder, InputCodec, get_encoder, get_input_codec
 from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX_FALL
+from de_dolby.utils import format_bytes
 from de_dolby.display import display_banner
 from de_dolby.metadata import HDR10Metadata, extract_rpu, parse_rpu_metadata
 from de_dolby.probe import FileInfo, probe
@@ -177,7 +178,7 @@ def _pipeline_lossless(info: FileInfo, input_codec: InputCodec,
         progress.complete_step()
 
         output_size = Path(output_path).stat().st_size if not options.dry_run else 0
-        progress.finish(f"Done! Output: {output_path} ({_format_bytes(output_size)})")
+        progress.finish(f"Done! Output: {output_path} ({format_bytes(output_size)})")
 
     except BaseException:
         _cleanup_temp(tmp_dir)
@@ -250,7 +251,8 @@ def _pipeline_reencode(info: FileInfo, input_codec: InputCodec, encoder: Encoder
                 source_bitrate=info.video_streams[0].bitrate if info.video_streams else None,
                 dv_profile5=dv_profile5,
             )
-            run_ffmpeg_with_progress(ffmpeg_cmd, encode_duration, progress)
+            run_ffmpeg_with_progress(ffmpeg_cmd, encode_duration, progress,
+                                       verbose=options.verbose)
         progress.complete_step()
 
         # Step 7: Remux with mkvmerge
@@ -265,7 +267,7 @@ def _pipeline_reencode(info: FileInfo, input_codec: InputCodec, encoder: Encoder
         progress.complete_step()
 
         output_size = Path(output_path).stat().st_size if not options.dry_run else 0
-        progress.finish(f"Done! Output: {output_path} ({_format_bytes(output_size)})")
+        progress.finish(f"Done! Output: {output_path} ({format_bytes(output_size)})")
 
     except BaseException:
         _cleanup_temp(tmp_dir)
@@ -414,8 +416,8 @@ def _check_disk_space(info: FileInfo, options: ConvertOptions) -> None:
     except OSError:
         return
     if usage.free < estimated_bytes:
-        free_str = _format_bytes(usage.free)
-        need_str = _format_bytes(estimated_bytes)
+        free_str = format_bytes(usage.free)
+        need_str = format_bytes(estimated_bytes)
         print(f"Warning: temp directory may not have enough space "
               f"(free: {free_str}, estimated need: {need_str})",
               file=sys.stderr)
@@ -433,13 +435,5 @@ def _cleanup_temp(tmp_dir: str) -> None:
 def _format_size(info: FileInfo) -> str:
     if info.overall_bitrate and info.duration:
         size_bytes = (info.overall_bitrate * info.duration) / 8
-        return _format_bytes(int(size_bytes))
+        return format_bytes(int(size_bytes))
     return "unknown size"
-
-
-def _format_bytes(n: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"

@@ -6,24 +6,7 @@ from pathlib import Path
 
 from de_dolby import __version__
 from de_dolby.probe import FileInfo
-
-
-# ANSI color codes
-class _C:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    CYAN = "\033[36m"
-    BRIGHT_CYAN = "\033[96m"
-    MAGENTA = "\033[35m"
-    BRIGHT_MAGENTA = "\033[95m"
-    WHITE = "\033[97m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BRIGHT_YELLOW = "\033[93m"
-    BLUE = "\033[34m"
-    BRIGHT_BLUE = "\033[94m"
-    RED = "\033[31m"
+from de_dolby.utils import Colors as _C
 
 
 # ASCII art logo lines (each line must be the same character width)
@@ -40,21 +23,7 @@ _LOGO_LINES = [
 _LOGO_WIDTH = len(_LOGO_LINES[0])
 
 
-def _format_duration(seconds: float | None) -> str:
-    if seconds is None:
-        return "unknown"
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    return f"{h}:{m:02d}:{s:02d}"
-
-
-def _format_bytes(n: int | float) -> str:
-    val = float(n)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if val < 1024:
-            return f"{val:.1f} {unit}"
-        val /= 1024
-    return f"{val:.1f} PB"
+from de_dolby.utils import format_bytes as _format_bytes, format_duration as _format_duration
 
 
 def _file_size(path: str) -> str:
@@ -162,13 +131,9 @@ def _build_info_rows(info: FileInfo, output_path: str | None = None,
         rows.append(("Subs", subs))
 
     if encoder_name:
-        encoder_label = encoder_name
-        if encoder_name == "hevc_amf":
-            encoder_label = "hevc_amf (AMD GPU)"
-        elif encoder_name == "libx265":
-            encoder_label = "libx265 (CPU)"
-        elif encoder_name == "copy":
-            encoder_label = "copy (no re-encode)"
+        from de_dolby.codecs import ENCODERS
+        encoder = ENCODERS.get(encoder_name)
+        encoder_label = encoder.display_name if encoder else encoder_name
         rows.append(("Encoder", encoder_label))
 
     if mode_str:

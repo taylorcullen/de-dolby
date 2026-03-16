@@ -7,19 +7,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-
-# ANSI color codes
-class _C:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    GREEN = "\033[32m"
-    BRIGHT_GREEN = "\033[92m"
-    CYAN = "\033[36m"
-    BRIGHT_CYAN = "\033[96m"
-    YELLOW = "\033[33m"
-    RED = "\033[31m"
-    WHITE = "\033[97m"
+from de_dolby.utils import Colors as _C
 
 
 # Progress bar characters
@@ -253,11 +241,10 @@ def parse_ffmpeg_progress(line: str, duration: float | None) -> dict | None:
 
 
 def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
-                              reporter: ProgressReporter) -> subprocess.CompletedProcess:
+                              reporter: ProgressReporter,
+                              verbose: bool = False) -> subprocess.CompletedProcess:
     """Run ffmpeg command while parsing stderr for progress updates."""
-    # Import here to avoid circular dependency
-    from de_dolby.tools import _verbose
-    if _verbose:
+    if verbose:
         print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
 
     process = subprocess.Popen(

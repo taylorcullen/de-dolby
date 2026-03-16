@@ -51,11 +51,13 @@ def configure_timeout(minutes: int | None) -> None:
 
 def configure_log_file(path: str | None) -> None:
     """Open a log file for writing all subprocess commands and output."""
+    import atexit
     global _log_file
     if _log_file:
         _log_file.close()
     if path:
         _log_file = open(path, "w")
+        atexit.register(lambda: _log_file.close() if _log_file else None)
     else:
         _log_file = None
 
@@ -113,13 +115,20 @@ _encoder_cache: dict[str, bool] = {}
 
 
 def check_encoder_available(name: str) -> bool:
-    """Check if ffmpeg supports a given encoder. Results are cached."""
+    """Check if ffmpeg supports a given encoder. Results are cached.
+
+    Matches on whole-word encoder names to avoid false positives
+    (e.g. 'hevc_amf' should not match 'hevc_amf_v2').
+    """
     if name in _encoder_cache:
         return _encoder_cache[name]
     try:
         r = _run([_paths.ffmpeg, "-encoders", "-hide_banner"], check=False)
         output = r.stdout.decode(errors="replace") if r.stdout else ""
-        available = name in output
+        # Each line is like: " V..... hevc_amf         AMD AMF HEVC encoder"
+        # Match the encoder name as a whitespace-delimited token
+        import re
+        available = bool(re.search(rf"\b{re.escape(name)}\b", output))
     except FileNotFoundError:
         available = False
     _encoder_cache[name] = available

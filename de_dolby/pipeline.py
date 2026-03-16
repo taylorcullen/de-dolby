@@ -17,7 +17,7 @@ from de_dolby.progress import (
     run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
-    check_amf_support, check_av1_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
+    check_encoder_available, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
 
 
@@ -39,16 +39,19 @@ class ConvertOptions:
 # ---------------------------------------------------------------------------
 
 def _resolve_encoder(options: ConvertOptions, input_codec: InputCodec) -> str:
-    """Resolve 'auto' encoder to a concrete encoder name."""
+    """Resolve 'auto' encoder to a concrete encoder name.
+
+    Tries each encoder in the codec's priority list, returning the first
+    one available in the local ffmpeg build. The last entry is always a
+    CPU fallback that doesn't require GPU hardware.
+    """
     if options.encoder != "auto":
         return options.encoder
-    gpu_name, cpu_name = input_codec.auto_encoder_names()
-    # Check if the GPU encoder is available
-    checker = {"hevc_amf": check_amf_support, "av1_amf": check_av1_amf_support}
-    check_fn = checker.get(gpu_name)
-    if check_fn and check_fn():
-        return gpu_name
-    return cpu_name
+    for name in input_codec.auto_encoder_priority():
+        if check_encoder_available(name):
+            return name
+    # Should never reach here — CPU fallback is always available
+    return input_codec.auto_encoder_priority()[-1]
 
 
 # ---------------------------------------------------------------------------

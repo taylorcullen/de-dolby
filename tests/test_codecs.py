@@ -51,17 +51,21 @@ class TestInputCodecs:
         assert "-f" in args
         assert "ivf" in args
 
-    def test_hevc_auto_encoders(self):
+    def test_hevc_auto_priority(self):
         codec = HEVCCodec()
-        gpu, cpu = codec.auto_encoder_names()
-        assert gpu == "hevc_amf"
-        assert cpu == "libx265"
+        priority = codec.auto_encoder_priority()
+        assert priority[0] == "hevc_amf"  # Windows AMD first
+        assert "hevc_nvenc" in priority
+        assert "hevc_vaapi" in priority
+        assert priority[-1] == "libx265"  # CPU fallback last
 
-    def test_av1_auto_encoders(self):
+    def test_av1_auto_priority(self):
         codec = AV1Codec()
-        gpu, cpu = codec.auto_encoder_names()
-        assert gpu == "av1_amf"
-        assert cpu == "libsvtav1"
+        priority = codec.auto_encoder_priority()
+        assert priority[0] == "av1_amf"
+        assert "av1_nvenc" in priority
+        assert "av1_vaapi" in priority
+        assert priority[-1] == "libsvtav1"
 
 
 # --- Encoder strategy tests ---
@@ -142,12 +146,11 @@ class TestEncoders:
             assert enc.ffmpeg_name == name
 
     def test_all_input_codecs_have_auto_encoders(self):
-        """Every input codec's auto encoders should be registered."""
+        """Every encoder in auto_encoder_priority should be registered."""
         seen = set()
         for codec in INPUT_CODECS.values():
             if codec.name in seen:
                 continue
             seen.add(codec.name)
-            gpu, cpu = codec.auto_encoder_names()
-            assert gpu in ENCODERS, f"{codec.name} gpu encoder {gpu} not registered"
-            assert cpu in ENCODERS, f"{codec.name} cpu encoder {cpu} not registered"
+            for name in codec.auto_encoder_priority():
+                assert name in ENCODERS, f"{codec.name} encoder {name} not registered"

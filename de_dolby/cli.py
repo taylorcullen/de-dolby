@@ -12,7 +12,8 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import check_amf_support, check_av1_amf_support, configure, configure_log_file, configure_timeout, require_tools
+from de_dolby.codecs import ENCODERS
+from de_dolby.tools import check_encoder_available, configure, configure_log_file, configure_timeout, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -70,7 +71,8 @@ def main() -> None:
     p_convert.add_argument("input", nargs="+", metavar="FILE",
                            help="Input MKV file(s) (Dolby Vision)")
     p_convert.add_argument("-o", "--output", help="Output MKV file (single input only)")
-    p_convert.add_argument("--encoder", choices=["auto", "hevc_amf", "libx265", "av1_amf", "libsvtav1", "copy"],
+    encoder_choices = ["auto"] + sorted(ENCODERS.keys())
+    p_convert.add_argument("--encoder", choices=encoder_choices,
                            default="auto", help="Video encoder (default: auto)")
     p_convert.add_argument("--quality", choices=["fast", "balanced", "quality"],
                            default="balanced", help="Encoder quality preset (default: balanced)")
@@ -195,13 +197,11 @@ def _cmd_convert(args: argparse.Namespace) -> None:
         configure_log_file(args.log_file)
 
     # Fail fast: check encoder availability before processing any files
-    if args.encoder == "hevc_amf" and not check_amf_support():
-        print("Error: hevc_amf encoder not available. "
-              "Use --encoder libx265 for CPU encoding.", file=sys.stderr)
-        sys.exit(1)
-    if args.encoder == "av1_amf" and not check_av1_amf_support():
-        print("Error: av1_amf encoder not available. "
-              "Use --encoder libsvtav1 for CPU AV1 encoding.", file=sys.stderr)
+    if args.encoder not in ("auto", "copy") and not check_encoder_available(args.encoder):
+        print(f"Error: {args.encoder} encoder not available in your ffmpeg build.",
+              file=sys.stderr)
+        print("  Use --encoder auto to let de-dolby pick the best available encoder.",
+              file=sys.stderr)
         sys.exit(1)
 
     options = ConvertOptions(

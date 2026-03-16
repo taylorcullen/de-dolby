@@ -164,6 +164,14 @@ def _cmd_convert(args: argparse.Namespace) -> None:
               file=sys.stderr)
         sys.exit(1)
 
+    # Validate numeric inputs
+    if args.crf is not None and not (0 <= args.crf <= 51):
+        print("Error: --crf must be between 0 and 51", file=sys.stderr)
+        sys.exit(2)
+    if args.sample is not None and args.sample <= 0:
+        print("Error: --sample must be a positive number of seconds", file=sys.stderr)
+        sys.exit(2)
+
     options = ConvertOptions(
         encoder=args.encoder,
         quality=args.quality,

@@ -7,7 +7,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, HEVC_AMF_PRESETS, LIBX265_PRESETS
+from de_dolby.config import (
+    AV1_AMF_PRESETS, DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL,
+    HEVC_AMF_PRESETS, LIBSVTAV1_PRESETS, LIBX265_PRESETS,
+)
 from de_dolby.display import display_banner
 from de_dolby.metadata import HDR10Metadata, extract_rpu, parse_rpu_metadata
 from de_dolby.probe import FileInfo, probe
@@ -16,7 +19,7 @@ from de_dolby.progress import (
     run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
-    check_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
+    check_amf_support, check_av1_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
 
 
@@ -50,9 +53,15 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
         raise RuntimeError(f"Output file already exists: {output_path} (use --force to overwrite)")
 
     # Determine encoder and mode before displaying banner
-    if info.dv_profile in (7, 8):
+    is_av1 = options.encoder in ("av1_amf", "libsvtav1")
+
+    if info.dv_profile in (7, 8) and (options.encoder in ("auto", "copy") or not is_av1):
         mode_str = "Lossless RPU strip (no re-encode)"
         encoder_name = "copy"
+    elif info.dv_profile in (7, 8) and is_av1:
+        # User explicitly wants AV1 — must re-encode even for Profile 7/8
+        mode_str = f"Re-encode to AV1 (Profile {info.dv_profile})"
+        encoder_name = options.encoder
     elif info.dv_profile == 5:
         mode_str = "Re-encode (Profile 5 color conversion)"
         encoder_name = options.encoder
@@ -72,10 +81,12 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
     if not options.dry_run:
         _check_disk_space(info, options)
 
-    if info.dv_profile in (7, 8):
+    if encoder_name == "copy":
         _pipeline_lossless(info, output_path, options)
-    elif info.dv_profile == 5:
-        _pipeline_reencode(info, output_path, options, resolved_encoder=encoder_name)
+    else:
+        dv_profile5 = (info.dv_profile == 5)
+        _pipeline_reencode(info, output_path, options,
+                           resolved_encoder=encoder_name, dv_profile5=dv_profile5)
 
 
 def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions) -> None:
@@ -186,19 +197,22 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
 
 
 def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions,
-                       resolved_encoder: str | None = None) -> None:
-    """Profile 5: re-encode with color space conversion."""
+                       resolved_encoder: str | None = None,
+                       dv_profile5: bool = True) -> None:
+    """Re-encode pipeline. For Profile 5 applies color conversion; for 7/8 decodes base layer."""
     progress = ProgressReporter(STEPS_REENCODE, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
     hevc_path = os.path.join(tmp_dir, "video.hevc")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
-    encoded_hevc_path = os.path.join(tmp_dir, "encoded.hevc")
     audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
 
     # Use pre-resolved encoder from convert(), or resolve now if called directly
     encoder = resolved_encoder or options.encoder
     if encoder == "auto":
         encoder = "hevc_amf" if check_amf_support() else "libx265"
+
+    is_av1 = encoder in ("av1_amf", "libsvtav1")
+    encoded_path = os.path.join(tmp_dir, "encoded.ivf" if is_av1 else "encoded.hevc")
 
     try:
         # Step 1: Probe (already done)
@@ -251,14 +265,14 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
         # Profile 5 IPTPQc2 color space → BT.2020 PQ. The encoder then writes
         # a clean HEVC stream without any DV signaling.
         encode_duration = options.sample_seconds or info.duration
-        encode_output = encoded_hevc_path
+        encode_output = encoded_path
         progress.begin_step("encode", f"using {encoder}{sample_label}")
         if not options.dry_run:
             ffmpeg_cmd = _build_encode_cmd(
                 info.path, encode_output, encoder, meta, options,
                 video_only=True,
                 source_bitrate=info.video_streams[0].bitrate if info.video_streams else None,
-                dv_profile5=True,
+                dv_profile5=dv_profile5,
             )
             run_ffmpeg_with_progress(ffmpeg_cmd, encode_duration, progress)
         progress.complete_step()
@@ -268,7 +282,7 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
         if not options.dry_run:
             mkvmerge_cmd = ["-o", output_path]
             mkvmerge_cmd += meta.mkvmerge_args(track_id=0)
-            mkvmerge_cmd.append(encoded_hevc_path)
+            mkvmerge_cmd.append(encoded_path)
             # Add audio and subtitle tracks — use truncated file in sample mode
             mkvmerge_cmd += ["-D"]
             if options.sample_seconds:
@@ -414,12 +428,51 @@ def _build_encode_cmd(input_path: str, output_path: str, encoder: str,
             "-x265-params", x265_params,
         ]
 
+    elif encoder == "av1_amf":
+        preset_cfg = AV1_AMF_PRESETS.get(options.quality, AV1_AMF_PRESETS["balanced"])
+        cmd += [
+            "-c:v", "av1_amf",
+            "-pix_fmt", "p010le",
+            "-quality", preset_cfg["quality"],
+            "-rc", preset_cfg["rc"],
+            "-color_primaries", "bt2020",
+            "-color_trc", "smpte2084",
+            "-colorspace", "bt2020nc",
+        ]
+        bitrate = options.bitrate
+        if not bitrate and source_bitrate:
+            target = int(source_bitrate * 0.8)
+            bitrate = str(target)
+        if not bitrate:
+            bitrate = "40M"
+        cmd += ["-b:v", bitrate]
+
+    elif encoder == "libsvtav1":
+        preset_cfg = LIBSVTAV1_PRESETS.get(options.quality, LIBSVTAV1_PRESETS["balanced"])
+        crf = options.crf if options.crf is not None else preset_cfg["crf"]
+        svtav1_params = (
+            f"color-primaries=9:transfer-characteristics=16:"
+            f"matrix-coefficients=9"
+        )
+        cmd += [
+            "-c:v", "libsvtav1",
+            "-pix_fmt", "yuv420p10le",
+            "-preset", str(preset_cfg["preset"]),
+            "-crf", str(crf),
+            "-svtav1-params", svtav1_params,
+            "-color_primaries", "bt2020",
+            "-color_trc", "smpte2084",
+            "-colorspace", "bt2020nc",
+        ]
+
     elif encoder == "copy":
         cmd += ["-c:v", "copy"]
 
+    is_av1 = encoder in ("av1_amf", "libsvtav1")
+
     if video_only:
-        # Output raw HEVC bitstream (no muxing, no audio/subs)
-        cmd += ["-an", "-sn", "-f", "hevc"]
+        # Output raw bitstream (no muxing, no audio/subs)
+        cmd += ["-an", "-sn", "-f", "ivf" if is_av1 else "hevc"]
     else:
         # Copy audio and subtitles into final MKV
         cmd += ["-c:a", "copy", "-c:s", "copy",

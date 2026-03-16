@@ -1,14 +1,13 @@
 """Input codec and encoder strategies for extensible format support.
 
 To add a new input codec:  subclass InputCodec
-To add a new encoder:      subclass Encoder
+To add a new encoder:      subclass Encoder (or HardwareEncoder for GPU encoders)
 Then register in the ENCODERS dict and INPUT_CODECS dict.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 from de_dolby.config import (
     AV1_AMF_PRESETS, AV1_NVENC_PRESETS, AV1_VAAPI_PRESETS,
@@ -96,7 +95,6 @@ class AV1Codec(InputCodec):
         return False  # dovi_tool can't strip RPU from AV1
 
     def extraction_args(self, output_path: str) -> list[str]:
-        # Not used — AV1 skips raw extraction (dovi_tool can't read it)
         return ["-f", "ivf", output_path]
 
     @property
@@ -126,6 +124,24 @@ def get_input_codec(codec_name: str) -> InputCodec:
 # ---------------------------------------------------------------------------
 # Encoder strategies
 # ---------------------------------------------------------------------------
+
+# Shared HDR10 color flags appended by all hardware encoders
+_HDR10_COLOR_ARGS = [
+    "-color_primaries", "bt2020",
+    "-color_trc", "smpte2084",
+    "-colorspace", "bt2020nc",
+]
+
+
+def _resolve_bitrate(bitrate: str | None, source_bitrate: int | None,
+                     fallback: str = "40M") -> str:
+    """Shared bitrate resolution for hardware encoders."""
+    if bitrate:
+        return bitrate
+    if source_bitrate:
+        return str(int(source_bitrate * 0.8))
+    return fallback
+
 
 class Encoder(ABC):
     """How to build ffmpeg encode arguments for a given output encoder."""
@@ -179,7 +195,55 @@ class CopyEncoder(Encoder):
         return ["-c:v", "copy"]
 
 
-class HevcAmfEncoder(Encoder):
+# ---------------------------------------------------------------------------
+# Hardware encoder base class — handles HDR color flags and bitrate
+# ---------------------------------------------------------------------------
+
+class HardwareEncoder(Encoder):
+    """Base for hardware GPU encoders (AMF, VAAPI, NVENC).
+
+    Subclasses provide:
+    - _presets: dict mapping quality tier → preset config
+    - _encoder_args(preset): encoder-specific ffmpeg flags
+    - _pix_fmt: pixel format (default: p010le)
+    - _pre_encoder_args(): args before -c:v (e.g. VAAPI device init)
+
+    The base class handles: -c:v, pixel format, HDR color flags, bitrate.
+    """
+
+    @property
+    @abstractmethod
+    def _presets(self) -> dict:
+        """Quality preset dict (e.g. HEVC_AMF_PRESETS)."""
+
+    @abstractmethod
+    def _encoder_args(self, preset: dict) -> list[str]:
+        """Encoder-specific flags from the preset (e.g. -quality, -rc)."""
+
+    @property
+    def _pix_fmt(self) -> str:
+        """Pixel format. Override for encoders that need something different."""
+        return "p010le"
+
+    def _pre_encoder_args(self) -> list[str]:
+        """Args before -c:v (e.g. VAAPI device init). Override if needed."""
+        return []
+
+    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
+        preset = self._presets.get(quality, list(self._presets.values())[0])
+        args = self._pre_encoder_args()
+        args += ["-c:v", self.ffmpeg_name, "-pix_fmt", self._pix_fmt]
+        args += self._encoder_args(preset)
+        args += _HDR10_COLOR_ARGS
+        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
+        return args
+
+
+# ---------------------------------------------------------------------------
+# AMF encoders (Windows AMD)
+# ---------------------------------------------------------------------------
+
+class HevcAmfEncoder(HardwareEncoder):
     @property
     def ffmpeg_name(self) -> str:
         return "hevc_amf"
@@ -192,21 +256,142 @@ class HevcAmfEncoder(Encoder):
     def codec_family(self) -> str:
         return "hevc"
 
-    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
-        preset = HEVC_AMF_PRESETS.get(quality, HEVC_AMF_PRESETS["balanced"])
-        args = [
-            "-c:v", "hevc_amf",
-            "-pix_fmt", "p010le",
-            "-quality", preset["quality"],
-            "-rc", preset["rc"],
-            "-profile:v", preset["profile"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
-        return args
+    @property
+    def _presets(self) -> dict:
+        return HEVC_AMF_PRESETS
 
+    def _encoder_args(self, preset):
+        return ["-quality", preset["quality"], "-rc", preset["rc"],
+                "-profile:v", preset["profile"]]
+
+
+class Av1AmfEncoder(HardwareEncoder):
+    @property
+    def ffmpeg_name(self) -> str:
+        return "av1_amf"
+
+    @property
+    def display_name(self) -> str:
+        return "av1_amf (AMD GPU)"
+
+    @property
+    def codec_family(self) -> str:
+        return "av1"
+
+    @property
+    def _presets(self) -> dict:
+        return AV1_AMF_PRESETS
+
+    def _encoder_args(self, preset):
+        return ["-quality", preset["quality"], "-rc", preset["rc"]]
+
+
+# ---------------------------------------------------------------------------
+# VAAPI encoders (Linux AMD/Intel)
+# ---------------------------------------------------------------------------
+
+class HevcVaapiEncoder(HardwareEncoder):
+    @property
+    def ffmpeg_name(self) -> str:
+        return "hevc_vaapi"
+
+    @property
+    def display_name(self) -> str:
+        return "hevc_vaapi (Linux GPU)"
+
+    @property
+    def codec_family(self) -> str:
+        return "hevc"
+
+    @property
+    def _presets(self) -> dict:
+        return HEVC_VAAPI_PRESETS
+
+    def _pre_encoder_args(self):
+        return ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=p010,hwupload"]
+
+    def _encoder_args(self, preset):
+        return ["-profile:v", "main10",
+                "-compression_level", str(preset["compression_level"]),
+                "-rc_mode", preset["rc_mode"]]
+
+
+class Av1VaapiEncoder(HardwareEncoder):
+    @property
+    def ffmpeg_name(self) -> str:
+        return "av1_vaapi"
+
+    @property
+    def display_name(self) -> str:
+        return "av1_vaapi (Linux GPU)"
+
+    @property
+    def codec_family(self) -> str:
+        return "av1"
+
+    @property
+    def _presets(self) -> dict:
+        return AV1_VAAPI_PRESETS
+
+    def _pre_encoder_args(self):
+        return ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=p010,hwupload"]
+
+    def _encoder_args(self, preset):
+        return ["-compression_level", str(preset["compression_level"]),
+                "-rc_mode", preset["rc_mode"]]
+
+
+# ---------------------------------------------------------------------------
+# NVENC encoders (NVIDIA, Linux/Windows)
+# ---------------------------------------------------------------------------
+
+class HevcNvencEncoder(HardwareEncoder):
+    @property
+    def ffmpeg_name(self) -> str:
+        return "hevc_nvenc"
+
+    @property
+    def display_name(self) -> str:
+        return "hevc_nvenc (NVIDIA GPU)"
+
+    @property
+    def codec_family(self) -> str:
+        return "hevc"
+
+    @property
+    def _presets(self) -> dict:
+        return HEVC_NVENC_PRESETS
+
+    def _encoder_args(self, preset):
+        return ["-preset:v", preset["preset"], "-tune:v", preset["tune"],
+                "-rc:v", preset["rc"], "-profile:v", "main10"]
+
+
+class Av1NvencEncoder(HardwareEncoder):
+    @property
+    def ffmpeg_name(self) -> str:
+        return "av1_nvenc"
+
+    @property
+    def display_name(self) -> str:
+        return "av1_nvenc (NVIDIA GPU)"
+
+    @property
+    def codec_family(self) -> str:
+        return "av1"
+
+    @property
+    def _presets(self) -> dict:
+        return AV1_NVENC_PRESETS
+
+    def _encoder_args(self, preset):
+        return ["-preset:v", preset["preset"], "-tune:v", preset["tune"],
+                "-rc:v", preset["rc"]]
+
+
+# ---------------------------------------------------------------------------
+# CPU encoders (all platforms)
+# ---------------------------------------------------------------------------
 
 class Libx265Encoder(Encoder):
     @property
@@ -238,170 +423,6 @@ class Libx265Encoder(Encoder):
         ]
 
 
-class Av1AmfEncoder(Encoder):
-    @property
-    def ffmpeg_name(self) -> str:
-        return "av1_amf"
-
-    @property
-    def display_name(self) -> str:
-        return "av1_amf (AMD GPU)"
-
-    @property
-    def codec_family(self) -> str:
-        return "av1"
-
-    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
-        preset = AV1_AMF_PRESETS.get(quality, AV1_AMF_PRESETS["balanced"])
-        args = [
-            "-c:v", "av1_amf",
-            "-pix_fmt", "p010le",
-            "-quality", preset["quality"],
-            "-rc", preset["rc"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
-        return args
-
-
-def _resolve_bitrate(bitrate: str | None, source_bitrate: int | None,
-                     fallback: str = "40M") -> str:
-    """Shared bitrate resolution for hardware encoders."""
-    if bitrate:
-        return bitrate
-    if source_bitrate:
-        return str(int(source_bitrate * 0.8))
-    return fallback
-
-
-class HevcVaapiEncoder(Encoder):
-    """VAAPI HEVC encoder (Linux AMD/Intel GPU)."""
-
-    @property
-    def ffmpeg_name(self) -> str:
-        return "hevc_vaapi"
-
-    @property
-    def display_name(self) -> str:
-        return "hevc_vaapi (Linux GPU)"
-
-    @property
-    def codec_family(self) -> str:
-        return "hevc"
-
-    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
-        preset = HEVC_VAAPI_PRESETS.get(quality, HEVC_VAAPI_PRESETS["balanced"])
-        args = [
-            "-vaapi_device", "/dev/dri/renderD128",
-            "-vf", "format=p010,hwupload",
-            "-c:v", "hevc_vaapi",
-            "-profile:v", "main10",
-            "-compression_level", str(preset["compression_level"]),
-            "-rc_mode", preset["rc_mode"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
-        return args
-
-
-class Av1VaapiEncoder(Encoder):
-    """VAAPI AV1 encoder (Linux AMD/Intel GPU)."""
-
-    @property
-    def ffmpeg_name(self) -> str:
-        return "av1_vaapi"
-
-    @property
-    def display_name(self) -> str:
-        return "av1_vaapi (Linux GPU)"
-
-    @property
-    def codec_family(self) -> str:
-        return "av1"
-
-    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
-        preset = AV1_VAAPI_PRESETS.get(quality, AV1_VAAPI_PRESETS["balanced"])
-        args = [
-            "-vaapi_device", "/dev/dri/renderD128",
-            "-vf", "format=p010,hwupload",
-            "-c:v", "av1_vaapi",
-            "-compression_level", str(preset["compression_level"]),
-            "-rc_mode", preset["rc_mode"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
-        return args
-
-
-class HevcNvencEncoder(Encoder):
-    """NVENC HEVC encoder (NVIDIA GPU, Linux/Windows)."""
-
-    @property
-    def ffmpeg_name(self) -> str:
-        return "hevc_nvenc"
-
-    @property
-    def display_name(self) -> str:
-        return "hevc_nvenc (NVIDIA GPU)"
-
-    @property
-    def codec_family(self) -> str:
-        return "hevc"
-
-    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
-        preset = HEVC_NVENC_PRESETS.get(quality, HEVC_NVENC_PRESETS["balanced"])
-        args = [
-            "-c:v", "hevc_nvenc",
-            "-pix_fmt", "p010le",
-            "-preset:v", preset["preset"],
-            "-tune:v", preset["tune"],
-            "-rc:v", preset["rc"],
-            "-profile:v", "main10",
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
-        return args
-
-
-class Av1NvencEncoder(Encoder):
-    """NVENC AV1 encoder (NVIDIA GPU, Linux/Windows)."""
-
-    @property
-    def ffmpeg_name(self) -> str:
-        return "av1_nvenc"
-
-    @property
-    def display_name(self) -> str:
-        return "av1_nvenc (NVIDIA GPU)"
-
-    @property
-    def codec_family(self) -> str:
-        return "av1"
-
-    def build_args(self, meta, quality, crf=None, bitrate=None, source_bitrate=None):
-        preset = AV1_NVENC_PRESETS.get(quality, AV1_NVENC_PRESETS["balanced"])
-        args = [
-            "-c:v", "av1_nvenc",
-            "-pix_fmt", "p010le",
-            "-preset:v", preset["preset"],
-            "-tune:v", preset["tune"],
-            "-rc:v", preset["rc"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        args += ["-b:v", _resolve_bitrate(bitrate, source_bitrate)]
-        return args
-
-
 class LibSvtAv1Encoder(Encoder):
     @property
     def ffmpeg_name(self) -> str:
@@ -424,11 +445,12 @@ class LibSvtAv1Encoder(Encoder):
             "-preset", str(preset["preset"]),
             "-crf", str(resolved_crf),
             "-svtav1-params", "color-primaries=9:transfer-characteristics=16:matrix-coefficients=9",
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
+        ] + _HDR10_COLOR_ARGS
 
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
 
 ENCODERS: dict[str, Encoder] = {
     "copy": CopyEncoder(),

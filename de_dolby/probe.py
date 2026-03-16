@@ -34,6 +34,8 @@ class FileInfo:
     dv_profile: int | None = None
     dv_bl_signal_compatibility_id: int | None = None
     has_hdr10: bool = False
+    master_display: str | None = None  # ffmpeg format: G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)
+    content_light_level: str | None = None  # "MaxCLL,MaxFALL"
     video_streams: list[StreamInfo] = field(default_factory=list)
     audio_streams: list[StreamInfo] = field(default_factory=list)
     subtitle_streams: list[StreamInfo] = field(default_factory=list)
@@ -86,11 +88,18 @@ def probe(path: str) -> FileInfo:
             if si.color_transfer == "smpte2084" and si.color_primaries == "bt2020":
                 info.has_hdr10 = True
 
-            # Check side data for DV config
+            # Check side data for DV config and HDR10 metadata
             for sd in s.get("side_data_list", []):
                 if sd.get("side_data_type") == "DOVI configuration record":
                     info.dv_profile = sd.get("dv_profile")
                     info.dv_bl_signal_compatibility_id = sd.get("dv_bl_signal_compatibility_id")
+                elif sd.get("side_data_type") == "Mastering display metadata":
+                    info.master_display = _parse_ffprobe_master_display(sd)
+                elif sd.get("side_data_type") == "Content light level metadata":
+                    max_cll = sd.get("max_content", 0)
+                    max_fall = sd.get("max_average", 0)
+                    if max_cll or max_fall:
+                        info.content_light_level = f"{max_cll},{max_fall}"
 
             info.video_streams.append(si)
         elif codec_type == "audio":
@@ -99,16 +108,55 @@ def probe(path: str) -> FileInfo:
         elif codec_type == "subtitle":
             info.subtitle_streams.append(si)
 
-    # Also check frames for DV side data (more reliable for some files)
-    if info.dv_profile is None:
-        for frame in data.get("frames", []):
-            for sd in frame.get("side_data_list", []):
-                if sd.get("side_data_type") == "DOVI configuration record":
-                    info.dv_profile = sd.get("dv_profile")
-                    info.dv_bl_signal_compatibility_id = sd.get("dv_bl_signal_compatibility_id")
-                    break
+    # Also check frames for DV side data and HDR10 metadata (more reliable for some files)
+    for frame in data.get("frames", []):
+        for sd in frame.get("side_data_list", []):
+            if sd.get("side_data_type") == "DOVI configuration record" and info.dv_profile is None:
+                info.dv_profile = sd.get("dv_profile")
+                info.dv_bl_signal_compatibility_id = sd.get("dv_bl_signal_compatibility_id")
+            elif sd.get("side_data_type") == "Mastering display metadata" and info.master_display is None:
+                info.master_display = _parse_ffprobe_master_display(sd)
+            elif sd.get("side_data_type") == "Content light level metadata" and info.content_light_level is None:
+                max_cll = sd.get("max_content", 0)
+                max_fall = sd.get("max_average", 0)
+                if max_cll or max_fall:
+                    info.content_light_level = f"{max_cll},{max_fall}"
 
     return info
+
+
+def _parse_rational(val: str) -> int:
+    """Parse a rational string like '34000/50000' to the numerator integer."""
+    if "/" in str(val):
+        num, _ = str(val).split("/", 1)
+        return int(num)
+    return int(val)
+
+
+def _parse_ffprobe_master_display(sd: dict) -> str | None:
+    """Parse ffprobe mastering display side data to ffmpeg master_display format.
+
+    ffprobe reports: red_x, red_y, green_x, green_y, blue_x, blue_y,
+    white_point_x, white_point_y, min_luminance, max_luminance
+    as rationals like '34000/50000'.
+
+    Returns: G(gx,gy)B(bx,by)R(rx,ry)WP(wpx,wpy)L(lmax,lmin)
+    with chromaticity in 1/50000 units and luminance in 1/10000 cd/m².
+    """
+    try:
+        gx = _parse_rational(sd["green_x"])
+        gy = _parse_rational(sd["green_y"])
+        bx = _parse_rational(sd["blue_x"])
+        by = _parse_rational(sd["blue_y"])
+        rx = _parse_rational(sd["red_x"])
+        ry = _parse_rational(sd["red_y"])
+        wpx = _parse_rational(sd["white_point_x"])
+        wpy = _parse_rational(sd["white_point_y"])
+        lmax = _parse_rational(sd["max_luminance"])
+        lmin = _parse_rational(sd["min_luminance"])
+        return f"G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wpx},{wpy})L({lmax},{lmin})"
+    except (KeyError, ValueError):
+        return None
 
 
 def format_info(info: FileInfo) -> str:

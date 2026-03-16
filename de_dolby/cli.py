@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import os
 import re
 import sys
 from pathlib import Path
@@ -10,7 +11,7 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import check_amf_support, configure, require_tools
+from de_dolby.tools import check_amf_support, configure, configure_timeout, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -76,6 +77,9 @@ def main() -> None:
     p_convert.add_argument("--bitrate", help="Target bitrate for hevc_amf, e.g. 40M")
     p_convert.add_argument("--sample", type=int, nargs="?", const=30, metavar="SECONDS",
                            help="Convert only the first N seconds for testing (default: 30)")
+    p_convert.add_argument("--temp-dir", help="Directory for intermediate files (default: system temp)")
+    p_convert.add_argument("--timeout", type=int, metavar="MINUTES",
+                           help="Timeout per subprocess call in minutes (default: none)")
     p_convert.add_argument("--dry-run", action="store_true", help="Print steps without executing")
     p_convert.add_argument("-v", "--verbose", action="store_true", help="Show detailed output")
     p_convert.add_argument("--force", action="store_true", help="Overwrite output if exists")
@@ -100,7 +104,7 @@ def main() -> None:
 
     if not args.command:
         parser.print_help()
-        sys.exit(1)
+        sys.exit(2)
 
     # Configure tool paths
     configure(
@@ -162,7 +166,28 @@ def _cmd_convert(args: argparse.Namespace) -> None:
     if args.output and multiple:
         print("Error: -o/--output cannot be used with multiple input files.",
               file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
+
+    # Validate numeric inputs
+    if args.crf is not None and not (0 <= args.crf <= 51):
+        print("Error: --crf must be between 0 and 51", file=sys.stderr)
+        sys.exit(2)
+    if args.sample is not None and args.sample <= 0:
+        print("Error: --sample must be a positive number of seconds", file=sys.stderr)
+        sys.exit(2)
+
+    # Validate --temp-dir if provided
+    if args.temp_dir:
+        td = Path(args.temp_dir)
+        if not td.is_dir():
+            print(f"Error: --temp-dir does not exist: {args.temp_dir}", file=sys.stderr)
+            sys.exit(1)
+        if not os.access(args.temp_dir, os.W_OK):
+            print(f"Error: --temp-dir is not writable: {args.temp_dir}", file=sys.stderr)
+            sys.exit(1)
+
+    if hasattr(args, "timeout") and args.timeout:
+        configure_timeout(args.timeout)
 
     # Fail fast: check encoder availability before processing any files
     if args.encoder == "hevc_amf" and not check_amf_support():
@@ -176,6 +201,7 @@ def _cmd_convert(args: argparse.Namespace) -> None:
         crf=args.crf,
         bitrate=args.bitrate,
         sample_seconds=args.sample,
+        temp_dir=args.temp_dir,
         dry_run=args.dry_run,
         verbose=args.verbose,
         force=args.force,

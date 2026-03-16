@@ -378,14 +378,17 @@ def _build_encode_cmd(input_path: str, output_path: str, encoder: str,
             "-color_trc", "smpte2084",
             "-colorspace", "bt2020nc",
         ]
-        # Bitrate
+        # Bitrate — hevc_amf needs an explicit target, unlike CRF-based encoders
         bitrate = options.bitrate
         if not bitrate and source_bitrate:
             # Use ~80% of source bitrate as target
             target = int(source_bitrate * 0.8)
             bitrate = str(target)
-        if bitrate:
-            cmd += ["-b:v", bitrate]
+        if not bitrate:
+            # Fallback for files where ffprobe doesn't report video bitrate.
+            # 40M is reasonable for 4K HDR content.
+            bitrate = "40M"
+        cmd += ["-b:v", bitrate]
 
     elif encoder == "libx265":
         preset_cfg = LIBX265_PRESETS.get(options.quality, LIBX265_PRESETS["balanced"])

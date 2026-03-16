@@ -100,13 +100,14 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
 def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions) -> None:
     """Profile 7/8/10: strip DV RPU without re-encoding."""
     is_av1_input = info.video_streams[0].codec_name == "av1"
-    ext = ".ivf" if is_av1_input else ".hevc"
 
     progress = ProgressReporter(STEPS_LOSSLESS, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
-    raw_path = os.path.join(tmp_dir, f"video{ext}")
+    raw_path = os.path.join(tmp_dir, "video.hevc")  # HEVC bitstream (only for HEVC input)
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
-    clean_path = os.path.join(tmp_dir, f"clean{ext}")
+    clean_hevc_path = os.path.join(tmp_dir, "clean.hevc")
+    # For AV1 input: extract video+audio to a temp MKV for dovi_tool to read
+    sample_mkv_path = os.path.join(tmp_dir, "sample.mkv")
     audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
 
     try:
@@ -116,20 +117,20 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
 
         # Step 2: Extract raw video bitstream
         sample_label = f" (sample: {options.sample_seconds}s)" if options.sample_seconds else ""
-        codec_label = "AV1" if is_av1_input else "HEVC"
         progress.begin_step("extract_hevc", f"({_format_size(info)}){sample_label}")
         if not options.dry_run:
-            extract_cmd = ["-i", info.path]
-            if options.sample_seconds:
-                extract_cmd += ["-t", str(options.sample_seconds)]
             if is_av1_input:
-                extract_cmd += [
-                    "-map", "0:v:0",
-                    "-c:v", "copy",
-                    "-f", "ivf",
-                    raw_path,
-                ]
+                # For AV1: extract to a temp MKV (dovi_tool reads MKV directly)
+                extract_cmd = ["-i", info.path]
+                if options.sample_seconds:
+                    extract_cmd += ["-t", str(options.sample_seconds)]
+                extract_cmd += ["-map", "0:v:0", "-c:v", "copy", sample_mkv_path]
+                run_ffmpeg(extract_cmd)
             else:
+                # For HEVC: extract raw Annex B bitstream
+                extract_cmd = ["-i", info.path]
+                if options.sample_seconds:
+                    extract_cmd += ["-t", str(options.sample_seconds)]
                 extract_cmd += [
                     "-map", "0:v:0",
                     "-c:v", "copy",
@@ -137,7 +138,7 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
                     "-f", "hevc",
                     raw_path,
                 ]
-            run_ffmpeg(extract_cmd)
+                run_ffmpeg(extract_cmd)
 
             # In sample mode, also extract truncated audio/subs so they
             # match the video duration (the original MKV is full-length)
@@ -147,10 +148,11 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
                 run_ffmpeg(as_cmd)
         progress.complete_step()
 
-        # Step 3: Extract RPU
+        # Step 3: Extract RPU (dovi_tool reads MKV directly for AV1)
+        rpu_source = sample_mkv_path if is_av1_input else raw_path
         progress.begin_step("extract_rpu")
         if not options.dry_run:
-            extract_rpu(raw_path, rpu_path)
+            extract_rpu(rpu_source, rpu_path)
         progress.complete_step()
 
         # Step 4: Parse HDR10 metadata from RPU, with ffprobe fallback
@@ -182,7 +184,12 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
         # Step 5: Strip RPU from video bitstream
         progress.begin_step("strip_rpu")
         if not options.dry_run:
-            run_dovi_tool(["remove", raw_path, "-o", clean_path])
+            if is_av1_input:
+                # For AV1: dovi_tool remove reads MKV, outputs MKV without DV RPU
+                clean_av1_mkv = os.path.join(tmp_dir, "clean.mkv")
+                run_dovi_tool(["remove", sample_mkv_path, "-o", clean_av1_mkv])
+            else:
+                run_dovi_tool(["remove", raw_path, "-o", clean_hevc_path])
         progress.complete_step()
 
         # Step 6: Remux with mkvmerge
@@ -191,8 +198,11 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
             mkvmerge_cmd = ["-o", output_path]
             # Add HDR10 metadata flags for track 0
             mkvmerge_cmd += meta.mkvmerge_args(track_id=0)
-            # Add clean video
-            mkvmerge_cmd.append(clean_path)
+            # Add clean video (AV1: from clean MKV; HEVC: from raw bitstream)
+            if is_av1_input:
+                mkvmerge_cmd.append(clean_av1_mkv)
+            else:
+                mkvmerge_cmd.append(clean_hevc_path)
             # Add audio and subtitle tracks — use truncated file in sample mode
             mkvmerge_cmd += ["-D"]
             if options.sample_seconds:
@@ -224,8 +234,8 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
 
     progress = ProgressReporter(STEPS_REENCODE, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
-    raw_ext = ".ivf" if is_av1_input else ".hevc"
-    raw_path = os.path.join(tmp_dir, f"video{raw_ext}")
+    raw_path = os.path.join(tmp_dir, "video.hevc")  # only used for HEVC input
+    sample_mkv_path = os.path.join(tmp_dir, "sample.mkv")  # for AV1: dovi_tool reads MKV
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
     audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
 
@@ -245,21 +255,22 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
         progress.begin_step("probe")
         progress.complete_step()
 
-        # Step 2: Extract raw video bitstream (for RPU extraction only)
+        # Step 2: Extract video for RPU extraction
         sample_label = f" (sample: {options.sample_seconds}s)" if options.sample_seconds else ""
         progress.begin_step("extract_hevc", f"({_format_size(info)}){sample_label}")
         if not options.dry_run:
-            extract_cmd = ["-i", info.path]
-            if options.sample_seconds:
-                extract_cmd += ["-t", str(options.sample_seconds)]
             if is_av1_input:
-                extract_cmd += [
-                    "-map", "0:v:0",
-                    "-c:v", "copy",
-                    "-f", "ivf",
-                    raw_path,
-                ]
+                # AV1: extract to temp MKV (dovi_tool reads MKV directly)
+                extract_cmd = ["-i", info.path]
+                if options.sample_seconds:
+                    extract_cmd += ["-t", str(options.sample_seconds)]
+                extract_cmd += ["-map", "0:v:0", "-c:v", "copy", sample_mkv_path]
+                run_ffmpeg(extract_cmd)
             else:
+                # HEVC: extract raw Annex B bitstream
+                extract_cmd = ["-i", info.path]
+                if options.sample_seconds:
+                    extract_cmd += ["-t", str(options.sample_seconds)]
                 extract_cmd += [
                     "-map", "0:v:0",
                     "-c:v", "copy",
@@ -276,10 +287,11 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
                 run_ffmpeg(as_cmd)
         progress.complete_step()
 
-        # Step 3: Extract RPU
+        # Step 3: Extract RPU (dovi_tool reads MKV for AV1, raw bitstream for HEVC)
+        rpu_source = sample_mkv_path if is_av1_input else raw_path
         progress.begin_step("extract_rpu")
         if not options.dry_run:
-            extract_rpu(raw_path, rpu_path)
+            extract_rpu(rpu_source, rpu_path)
         progress.complete_step()
 
         # Step 4: Parse HDR10 metadata

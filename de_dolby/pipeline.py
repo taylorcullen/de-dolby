@@ -157,7 +157,7 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
         output_size = Path(output_path).stat().st_size if not options.dry_run else 0
         progress.finish(f"Done! Output: {output_path} ({_format_bytes(output_size)})")
 
-    except Exception:
+    except BaseException:
         _cleanup_temp(tmp_dir)
         raise
 
@@ -263,7 +263,7 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
         output_size = Path(output_path).stat().st_size if not options.dry_run else 0
         progress.finish(f"Done! Output: {output_path} ({_format_bytes(output_size)})")
 
-    except Exception:
+    except BaseException:
         _cleanup_temp(tmp_dir)
         raise
 

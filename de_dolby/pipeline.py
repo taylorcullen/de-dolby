@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from de_dolby.config import (
-    AV1_AMF_PRESETS, DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL,
+    AV1_AMF_PRESETS, DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX_FALL,
     HEVC_AMF_PRESETS, LIBSVTAV1_PRESETS, LIBX265_PRESETS,
 )
 from de_dolby.display import display_banner

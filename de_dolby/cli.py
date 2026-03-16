@@ -11,7 +11,7 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import check_amf_support, configure, configure_timeout, require_tools
+from de_dolby.tools import check_amf_support, configure, configure_log_file, configure_timeout, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -80,6 +80,7 @@ def main() -> None:
     p_convert.add_argument("--temp-dir", help="Directory for intermediate files (default: system temp)")
     p_convert.add_argument("--timeout", type=int, metavar="MINUTES",
                            help="Timeout per subprocess call in minutes (default: none)")
+    p_convert.add_argument("--log-file", metavar="PATH", help="Write all commands and output to a log file")
     p_convert.add_argument("--dry-run", action="store_true", help="Print steps without executing")
     p_convert.add_argument("-v", "--verbose", action="store_true", help="Show detailed output")
     p_convert.add_argument("--force", action="store_true", help="Overwrite output if exists")
@@ -188,6 +189,9 @@ def _cmd_convert(args: argparse.Namespace) -> None:
 
     if hasattr(args, "timeout") and args.timeout:
         configure_timeout(args.timeout)
+
+    if hasattr(args, "log_file") and args.log_file:
+        configure_log_file(args.log_file)
 
     # Fail fast: check encoder availability before processing any files
     if args.encoder == "hevc_amf" and not check_amf_support():

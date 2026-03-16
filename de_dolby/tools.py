@@ -17,6 +17,7 @@ class ToolPaths:
 
 _paths = ToolPaths()
 _verbose = False
+_log_file = None
 
 
 def set_verbose(enabled: bool) -> None:
@@ -48,10 +49,29 @@ def configure_timeout(minutes: int | None) -> None:
     _timeout_seconds = minutes * 60 if minutes else None
 
 
+def configure_log_file(path: str | None) -> None:
+    """Open a log file for writing all subprocess commands and output."""
+    global _log_file
+    if _log_file:
+        _log_file.close()
+    if path:
+        _log_file = open(path, "w")
+    else:
+        _log_file = None
+
+
+def _log(msg: str) -> None:
+    """Write a line to the log file if configured."""
+    if _log_file:
+        _log_file.write(msg + "\n")
+        _log_file.flush()
+
+
 def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
          stdin_data: bytes | None = None, pipe_stdin: bool = False) -> subprocess.CompletedProcess:
     if _verbose:
         print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
+    _log(f"$ {' '.join(cmd)}")
     stdin = subprocess.PIPE if (stdin_data is not None or pipe_stdin) else None
     stdout = subprocess.PIPE if capture else None
     stderr = subprocess.PIPE
@@ -61,9 +81,15 @@ def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
             input=stdin_data, check=False, timeout=_timeout_seconds,
         )
     except subprocess.TimeoutExpired:
+        _log(f"TIMEOUT after {_timeout_seconds}s")
         raise RuntimeError(
             f"Command timed out after {_timeout_seconds}s: {' '.join(cmd)}"
         )
+    _log(f"exit={result.returncode}")
+    if result.stderr:
+        stderr_text = result.stderr.decode(errors="replace").strip()
+        if stderr_text:
+            _log(stderr_text)
     if check and result.returncode != 0:
         err = result.stderr.decode(errors="replace") if result.stderr else ""
         out = result.stdout.decode(errors="replace") if result.stdout else ""

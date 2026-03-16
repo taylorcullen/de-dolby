@@ -14,7 +14,7 @@ from de_dolby.progress import (
     run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
-    check_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge,
+    check_amf_support, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
 
 
@@ -65,6 +65,8 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
     display_banner(info, output_path, encoder_name, mode_str,
                    sample_seconds=options.sample_seconds)
 
+    set_verbose(options.verbose)
+
     if info.dv_profile in (7, 8):
         _pipeline_lossless(info, output_path, options)
     elif info.dv_profile == 5:
@@ -78,6 +80,7 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
     hevc_path = os.path.join(tmp_dir, "video.hevc")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
     clean_hevc_path = os.path.join(tmp_dir, "clean.hevc")
+    audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
 
     try:
         # Step 1: Probe (already done)
@@ -99,6 +102,13 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
                 hevc_path,
             ]
             run_ffmpeg(extract_cmd)
+
+            # In sample mode, also extract truncated audio/subs so they
+            # match the video duration (the original MKV is full-length)
+            if options.sample_seconds:
+                as_cmd = ["-i", info.path, "-t", str(options.sample_seconds),
+                          "-vn", "-c:a", "copy", "-c:s", "copy", audio_subs_path]
+                run_ffmpeg(as_cmd)
         progress.complete_step()
 
         # Step 3: Extract RPU
@@ -129,13 +139,12 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
             mkvmerge_cmd += meta.mkvmerge_args(track_id=0)
             # Add clean HEVC video
             mkvmerge_cmd.append(clean_hevc_path)
-            # Add audio and subtitle tracks from original (no video = -D)
+            # Add audio and subtitle tracks — use truncated file in sample mode
             mkvmerge_cmd += ["-D"]
             if options.sample_seconds:
-                m, s = divmod(options.sample_seconds, 60)
-                h, m = divmod(m, 60)
-                mkvmerge_cmd += ["--split", f"parts:00:00:00-{h:02d}:{m:02d}:{s:02d}"]
-            mkvmerge_cmd.append(info.path)
+                mkvmerge_cmd.append(audio_subs_path)
+            else:
+                mkvmerge_cmd.append(info.path)
 
             run_mkvmerge(mkvmerge_cmd)
         progress.complete_step()
@@ -161,6 +170,7 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
     hevc_path = os.path.join(tmp_dir, "video.hevc")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
     encoded_hevc_path = os.path.join(tmp_dir, "encoded.hevc")
+    audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
 
     # Use pre-resolved encoder from convert(), or resolve now if called directly
     encoder = resolved_encoder or options.encoder
@@ -187,6 +197,12 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
                 hevc_path,
             ]
             run_ffmpeg(extract_cmd)
+
+            # In sample mode, extract truncated audio/subs to match video duration
+            if options.sample_seconds:
+                as_cmd = ["-i", info.path, "-t", str(options.sample_seconds),
+                          "-vn", "-c:a", "copy", "-c:s", "copy", audio_subs_path]
+                run_ffmpeg(as_cmd)
         progress.complete_step()
 
         # Step 3: Extract RPU
@@ -221,8 +237,6 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
                 source_bitrate=info.video_streams[0].bitrate if info.video_streams else None,
                 dv_profile5=True,
             )
-            if options.verbose:
-                print(f"    cmd: {' '.join(ffmpeg_cmd)}")
             run_ffmpeg_with_progress(ffmpeg_cmd, encode_duration, progress)
         progress.complete_step()
 
@@ -232,13 +246,12 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
             mkvmerge_cmd = ["-o", output_path]
             mkvmerge_cmd += meta.mkvmerge_args(track_id=0)
             mkvmerge_cmd.append(encoded_hevc_path)
-            # Add audio and subtitle tracks from original (no video = -D)
+            # Add audio and subtitle tracks — use truncated file in sample mode
             mkvmerge_cmd += ["-D"]
             if options.sample_seconds:
-                m, s = divmod(options.sample_seconds, 60)
-                h, m = divmod(m, 60)
-                mkvmerge_cmd += ["--split", f"parts:00:00:00-{h:02d}:{m:02d}:{s:02d}"]
-            mkvmerge_cmd.append(info.path)
+                mkvmerge_cmd.append(audio_subs_path)
+            else:
+                mkvmerge_cmd.append(info.path)
             run_mkvmerge(mkvmerge_cmd)
         progress.complete_step()
 

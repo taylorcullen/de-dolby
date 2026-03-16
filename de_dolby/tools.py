@@ -16,6 +16,13 @@ class ToolPaths:
 
 
 _paths = ToolPaths()
+_verbose = False
+
+
+def set_verbose(enabled: bool) -> None:
+    """Enable or disable verbose command logging for all subprocess calls."""
+    global _verbose
+    _verbose = enabled
 
 
 def configure(*, ffmpeg: str | None = None, dovi_tool: str | None = None,
@@ -43,6 +50,8 @@ def configure_timeout(minutes: int | None) -> None:
 
 def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
          stdin_data: bytes | None = None, pipe_stdin: bool = False) -> subprocess.CompletedProcess:
+    if _verbose:
+        print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
     stdin = subprocess.PIPE if (stdin_data is not None or pipe_stdin) else None
     stdout = subprocess.PIPE if capture else None
     stderr = subprocess.PIPE

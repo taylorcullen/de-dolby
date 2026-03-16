@@ -1,4 +1,4 @@
-"""Conversion pipelines: lossless strip (Profile 7/8) and re-encode (Profile 5)."""
+"""Conversion pipelines: lossless strip (Profile 7/8) and re-encode (Profile 5/10)."""
 
 import os
 import shutil
@@ -7,10 +7,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from de_dolby.config import (
-    AV1_AMF_PRESETS, DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX_FALL,
-    HEVC_AMF_PRESETS, LIBSVTAV1_PRESETS, LIBX265_PRESETS,
-)
+from de_dolby.codecs import Encoder, InputCodec, get_encoder, get_input_codec
+from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX_FALL
 from de_dolby.display import display_banner
 from de_dolby.metadata import HDR10Metadata, extract_rpu, parse_rpu_metadata
 from de_dolby.probe import FileInfo, probe
@@ -25,7 +23,7 @@ from de_dolby.tools import (
 
 @dataclass
 class ConvertOptions:
-    encoder: str = "auto"       # auto, hevc_amf, libx265, copy
+    encoder: str = "auto"       # auto, hevc_amf, libx265, av1_amf, libsvtav1, copy
     quality: str = "balanced"   # fast, balanced, quality
     crf: int | None = None
     bitrate: str | None = None
@@ -36,6 +34,27 @@ class ConvertOptions:
     force: bool = False
 
 
+# ---------------------------------------------------------------------------
+# Encoder resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_encoder(options: ConvertOptions, input_codec: InputCodec) -> str:
+    """Resolve 'auto' encoder to a concrete encoder name."""
+    if options.encoder != "auto":
+        return options.encoder
+    gpu_name, cpu_name = input_codec.auto_encoder_names()
+    # Check if the GPU encoder is available
+    checker = {"hevc_amf": check_amf_support, "av1_amf": check_av1_amf_support}
+    check_fn = checker.get(gpu_name)
+    if check_fn and check_fn():
+        return gpu_name
+    return cpu_name
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
 def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
     """Main conversion entry point."""
     info = probe(input_path)
@@ -43,9 +62,8 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
     if not info.video_streams:
         raise RuntimeError("No video streams found in input file")
 
-    input_codec = info.video_streams[0].codec_name
-    if input_codec not in ("hevc", "h265", "av1"):
-        raise RuntimeError(f"Video codec is {input_codec}, expected HEVC or AV1")
+    codec_name = info.video_streams[0].codec_name
+    input_codec = get_input_codec(codec_name)
 
     if info.dv_profile is None:
         raise RuntimeError("No Dolby Vision metadata detected in input file")
@@ -53,38 +71,27 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
     if not options.force and Path(output_path).exists():
         raise RuntimeError(f"Output file already exists: {output_path} (use --force to overwrite)")
 
-    # Determine encoder and mode before displaying banner
-    is_av1_input = input_codec == "av1"
-    is_av1_encoder = options.encoder in ("av1_amf", "libsvtav1")
-    needs_reencode = is_av1_encoder or is_av1_input
+    # Determine encoder and pipeline mode
+    encoder_name = _resolve_encoder(options, input_codec)
+    encoder = get_encoder(encoder_name)
+    use_lossless = (
+        input_codec.supports_lossless
+        and encoder_name == "copy"
+        and info.dv_profile in (7, 8, 10)
+    )
 
-    if info.dv_profile in (7, 8, 10) and not needs_reencode and options.encoder in ("auto", "copy"):
-        if is_av1_input:
-            # AV1 lossless strip not supported (dovi_tool can't process AV1 tracks)
-            # Fall back to re-encode
-            needs_reencode = True
-        else:
-            mode_str = "Lossless RPU strip (no re-encode)"
-            encoder_name = "copy"
-    if info.dv_profile in (7, 8, 10) and needs_reencode:
-        encoder_name = options.encoder
-        if encoder_name == "auto":
-            if is_av1_input:
-                encoder_name = "av1_amf" if check_av1_amf_support() else "libsvtav1"
-            else:
-                encoder_name = "hevc_amf" if check_amf_support() else "libx265"
-        codec_label = "AV1" if encoder_name in ("av1_amf", "libsvtav1") else "HEVC"
-        mode_str = f"Re-encode to {codec_label} (Profile {info.dv_profile})"
-    elif info.dv_profile == 5:
-        mode_str = "Re-encode (Profile 5 color conversion)"
-        encoder_name = options.encoder
-        if encoder_name == "auto":
-            encoder_name = "hevc_amf" if check_amf_support() else "libx265"
-    else:
-        raise RuntimeError(
-            f"Unsupported Dolby Vision profile: {info.dv_profile}. "
-            f"Supported profiles: 5, 7, 8, 10"
+    # Force re-encode if input doesn't support lossless but user asked for copy
+    if not input_codec.supports_lossless and encoder_name == "copy":
+        encoder_name = _resolve_encoder(
+            ConvertOptions(encoder="auto", quality=options.quality), input_codec
         )
+        encoder = get_encoder(encoder_name)
+
+    # Build display strings
+    if use_lossless:
+        mode_str = "Lossless RPU strip (no re-encode)"
+    else:
+        mode_str = f"Re-encode to {encoder.codec_family.upper()} (Profile {info.dv_profile})"
 
     display_banner(info, output_path, encoder_name, mode_str,
                    sample_seconds=options.sample_seconds)
@@ -94,21 +101,25 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
     if not options.dry_run:
         _check_disk_space(info, options)
 
-    if encoder_name == "copy":
-        _pipeline_lossless(info, output_path, options)
+    if use_lossless:
+        _pipeline_lossless(info, input_codec, output_path, options)
     else:
         dv_profile5 = (info.dv_profile == 5)
-        _pipeline_reencode(info, output_path, options,
-                           resolved_encoder=encoder_name, dv_profile5=dv_profile5)
+        _pipeline_reencode(info, input_codec, encoder, output_path, options,
+                           dv_profile5=dv_profile5)
 
 
-def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions) -> None:
-    """Profile 7/8: strip DV RPU without re-encoding (HEVC input only)."""
+# ---------------------------------------------------------------------------
+# Lossless pipeline (HEVC only — strip DV RPU without re-encoding)
+# ---------------------------------------------------------------------------
+
+def _pipeline_lossless(info: FileInfo, input_codec: InputCodec,
+                       output_path: str, options: ConvertOptions) -> None:
     progress = ProgressReporter(STEPS_LOSSLESS, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
-    hevc_path = os.path.join(tmp_dir, "video.hevc")
+    raw_path = os.path.join(tmp_dir, f"video{input_codec.raw_extension}")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
-    clean_hevc_path = os.path.join(tmp_dir, "clean.hevc")
+    clean_path = os.path.join(tmp_dir, f"clean{input_codec.raw_extension}")
     audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
 
     try:
@@ -116,84 +127,45 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
         progress.begin_step("probe")
         progress.complete_step()
 
-        # Step 2: Extract raw HEVC bitstream
+        # Step 2: Extract raw video bitstream
         sample_label = f" (sample: {options.sample_seconds}s)" if options.sample_seconds else ""
         progress.begin_step("extract_hevc", f"({_format_size(info)}){sample_label}")
         if not options.dry_run:
             extract_cmd = ["-i", info.path]
             if options.sample_seconds:
                 extract_cmd += ["-t", str(options.sample_seconds)]
-            extract_cmd += [
-                "-map", "0:v:0",
-                "-c:v", "copy",
-                "-bsf:v", "hevc_mp4toannexb",
-                "-f", "hevc",
-                hevc_path,
-            ]
+            extract_cmd += ["-map", "0:v:0", "-c:v", "copy"]
+            extract_cmd += input_codec.extraction_args(raw_path)
             run_ffmpeg(extract_cmd)
 
-            # In sample mode, also extract truncated audio/subs so they
-            # match the video duration (the original MKV is full-length)
             if options.sample_seconds:
-                as_cmd = ["-i", info.path, "-t", str(options.sample_seconds),
-                          "-vn", "-c:a", "copy", "-c:s", "copy", audio_subs_path]
-                run_ffmpeg(as_cmd)
+                _extract_audio_subs(info.path, options.sample_seconds, audio_subs_path)
         progress.complete_step()
 
         # Step 3: Extract RPU
         progress.begin_step("extract_rpu")
         if not options.dry_run:
-            extract_rpu(hevc_path, rpu_path)
+            extract_rpu(raw_path, rpu_path)
         progress.complete_step()
 
-        # Step 4: Parse HDR10 metadata from RPU, with ffprobe fallback
+        # Step 4: Parse HDR10 metadata from RPU
         progress.begin_step("parse_meta")
         if not options.dry_run:
-            meta = parse_rpu_metadata(rpu_path)
-            # Use ffprobe-sourced master display if dovi_tool didn't provide one
-            if meta.master_display == DEFAULT_MASTER_DISPLAY and info.master_display:
-                meta = HDR10Metadata(
-                    master_display=info.master_display,
-                    max_cll=meta.max_cll,
-                    max_fall=meta.max_fall,
-                )
-            # Use ffprobe-sourced content light level if RPU didn't have L6
-            if info.content_light_level:
-                parts = info.content_light_level.split(",")
-                if len(parts) == 2:
-                    probe_cll, probe_fall = int(parts[0]), int(parts[1])
-                    if meta.max_cll == DEFAULT_MAX_CLL and probe_cll:
-                        meta = HDR10Metadata(
-                            master_display=meta.master_display,
-                            max_cll=probe_cll,
-                            max_fall=probe_fall,
-                        )
+            meta = _parse_meta_with_fallback(rpu_path, info)
         else:
             meta = HDR10Metadata(master_display="", max_cll=0, max_fall=0)
         progress.complete_step()
 
-        # Step 5: Strip RPU from HEVC
+        # Step 5: Strip RPU
         progress.begin_step("strip_rpu")
         if not options.dry_run:
-            run_dovi_tool(["remove", hevc_path, "-o", clean_hevc_path])
+            run_dovi_tool(["remove", raw_path, "-o", clean_path])
         progress.complete_step()
 
         # Step 6: Remux with mkvmerge
         progress.begin_step("remux")
         if not options.dry_run:
-            mkvmerge_cmd = ["-o", output_path]
-            # Add HDR10 metadata flags for track 0
-            mkvmerge_cmd += meta.mkvmerge_args(track_id=0)
-            # Add clean HEVC video
-            mkvmerge_cmd.append(clean_hevc_path)
-            # Add audio and subtitle tracks — use truncated file in sample mode
-            mkvmerge_cmd += ["-D"]
-            if options.sample_seconds:
-                mkvmerge_cmd.append(audio_subs_path)
-            else:
-                mkvmerge_cmd.append(info.path)
-
-            run_mkvmerge(mkvmerge_cmd)
+            _remux(output_path, clean_path, meta, info, options, audio_subs_path)
         progress.complete_step()
 
         # Step 7: Cleanup
@@ -209,90 +181,68 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
         raise
 
 
-def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions,
-                       resolved_encoder: str | None = None,
-                       dv_profile5: bool = True) -> None:
-    """Re-encode pipeline. For Profile 5 applies color conversion; for 7/8/10 decodes base layer."""
-    is_av1_input = info.video_streams[0].codec_name == "av1"
+# ---------------------------------------------------------------------------
+# Re-encode pipeline
+# ---------------------------------------------------------------------------
 
+def _pipeline_reencode(info: FileInfo, input_codec: InputCodec, encoder: Encoder,
+                       output_path: str, options: ConvertOptions,
+                       dv_profile5: bool = True) -> None:
     progress = ProgressReporter(STEPS_REENCODE, verbose=options.verbose)
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
-    hevc_path = os.path.join(tmp_dir, "video.hevc")
+    raw_path = os.path.join(tmp_dir, f"video{input_codec.raw_extension}")
     rpu_path = os.path.join(tmp_dir, "rpu.bin")
+    encoded_path = os.path.join(tmp_dir, f"encoded{encoder.output_extension}")
     audio_subs_path = os.path.join(tmp_dir, "audio_subs.mkv")
-
-    # Use pre-resolved encoder from convert(), or resolve now if called directly
-    encoder = resolved_encoder or options.encoder
-    if encoder == "auto":
-        if is_av1_input:
-            encoder = "av1_amf" if check_av1_amf_support() else "libsvtav1"
-        else:
-            encoder = "hevc_amf" if check_amf_support() else "libx265"
-
-    is_av1_output = encoder in ("av1_amf", "libsvtav1")
-    encoded_path = os.path.join(tmp_dir, "encoded.ivf" if is_av1_output else "encoded.hevc")
 
     try:
         # Step 1: Probe (already done)
         progress.begin_step("probe")
         progress.complete_step()
 
-        # Step 2: Extract HEVC bitstream for RPU (HEVC only — AV1 skips this)
+        # Step 2: Extract video for RPU (skip if codec doesn't support dovi_tool)
         sample_label = f" (sample: {options.sample_seconds}s)" if options.sample_seconds else ""
         progress.begin_step("extract_hevc", f"({_format_size(info)}){sample_label}")
         if not options.dry_run:
-            if not is_av1_input:
+            if input_codec.supports_dovi_tool:
                 extract_cmd = ["-i", info.path]
                 if options.sample_seconds:
                     extract_cmd += ["-t", str(options.sample_seconds)]
-                extract_cmd += [
-                    "-map", "0:v:0",
-                    "-c:v", "copy",
-                    "-bsf:v", "hevc_mp4toannexb",
-                    "-f", "hevc",
-                    hevc_path,
-                ]
+                extract_cmd += ["-map", "0:v:0", "-c:v", "copy"]
+                extract_cmd += input_codec.extraction_args(raw_path)
                 run_ffmpeg(extract_cmd)
 
-            # In sample mode, extract truncated audio/subs to match video duration
             if options.sample_seconds:
-                as_cmd = ["-i", info.path, "-t", str(options.sample_seconds),
-                          "-vn", "-c:a", "copy", "-c:s", "copy", audio_subs_path]
-                run_ffmpeg(as_cmd)
+                _extract_audio_subs(info.path, options.sample_seconds, audio_subs_path)
         progress.complete_step()
 
-        # Step 3: Extract RPU (HEVC only — AV1 uses ffprobe metadata instead)
+        # Step 3: Extract RPU (only if codec supports dovi_tool)
         progress.begin_step("extract_rpu")
-        if not options.dry_run and not is_av1_input:
-            extract_rpu(hevc_path, rpu_path)
+        if not options.dry_run and input_codec.supports_dovi_tool:
+            extract_rpu(raw_path, rpu_path)
         progress.complete_step()
 
         # Step 4: Parse HDR10 metadata
         progress.begin_step("parse_meta")
         if not options.dry_run:
-            if is_av1_input:
-                # AV1 DV: dovi_tool can't read AV1, use ffprobe metadata directly
-                meta = _build_meta_from_probe(info)
+            if input_codec.supports_dovi_tool:
+                meta = _parse_meta_with_fallback(rpu_path, info)
             else:
-                meta = parse_rpu_metadata(rpu_path)
+                meta = _build_meta_from_probe(info)
         else:
             meta = HDR10Metadata(master_display="", max_cll=0, max_fall=0)
         progress.complete_step()
 
-        # Step 5: (no separate strip needed — ffmpeg decodes DV and outputs BT.2020)
+        # Step 5: (no separate strip — ffmpeg decodes DV during re-encode)
         progress.begin_step("strip_rpu")
         progress.complete_step()
 
-        # Step 6: Re-encode from ORIGINAL MKV with DV RPU intact.
-        # ffmpeg's HEVC decoder processes the DV RPU during decode, converting
-        # Profile 5 IPTPQc2 color space → BT.2020 PQ. The encoder then writes
-        # a clean HEVC stream without any DV signaling.
+        # Step 6: Re-encode from original MKV
         encode_duration = options.sample_seconds or info.duration
-        encode_output = encoded_path
-        progress.begin_step("encode", f"using {encoder}{sample_label}")
+        progress.begin_step("encode", f"using {encoder.ffmpeg_name}{sample_label}")
         if not options.dry_run:
             ffmpeg_cmd = _build_encode_cmd(
-                info.path, encode_output, encoder, meta, options,
+                info.path, encoded_path, encoder, meta, options,
                 video_only=True,
                 source_bitrate=info.video_streams[0].bitrate if info.video_streams else None,
                 dv_profile5=dv_profile5,
@@ -300,19 +250,10 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
             run_ffmpeg_with_progress(ffmpeg_cmd, encode_duration, progress)
         progress.complete_step()
 
-        # Step 7: Remux with mkvmerge — add HDR10 metadata + audio/subs from original
+        # Step 7: Remux with mkvmerge
         progress.begin_step("remux")
         if not options.dry_run:
-            mkvmerge_cmd = ["-o", output_path]
-            mkvmerge_cmd += meta.mkvmerge_args(track_id=0)
-            mkvmerge_cmd.append(encoded_path)
-            # Add audio and subtitle tracks — use truncated file in sample mode
-            mkvmerge_cmd += ["-D"]
-            if options.sample_seconds:
-                mkvmerge_cmd.append(audio_subs_path)
-            else:
-                mkvmerge_cmd.append(info.path)
-            run_mkvmerge(mkvmerge_cmd)
+            _remux(output_path, encoded_path, meta, info, options, audio_subs_path)
         progress.complete_step()
 
         # Step 8: Cleanup
@@ -328,14 +269,12 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
         raise
 
 
-def preview_frame(input_path: str, timestamp: str, output_path: str) -> None:
-    """Extract a single frame at the given timestamp, tone-mapped to SDR PNG.
+# ---------------------------------------------------------------------------
+# Preview
+# ---------------------------------------------------------------------------
 
-    Detects DV profile to choose the right filter:
-    - Profile 5: uses libplacebo to convert IPTPQc2 → BT.709 SDR
-    - Profile 7/8: uses zscale + tonemap (base layer is already BT.2020 PQ)
-    - No DV: simple zscale + tonemap for standard HDR10
-    """
+def preview_frame(input_path: str, timestamp: str, output_path: str) -> None:
+    """Extract a single frame at the given timestamp, tone-mapped to SDR PNG."""
     info = probe(input_path)
     print(f"\n  Extracting frame at {timestamp} from {input_path}")
     print(f"  Output: {output_path}")
@@ -343,9 +282,8 @@ def preview_frame(input_path: str, timestamp: str, output_path: str) -> None:
     if info.dv_profile == 5:
         vf = _libplacebo_tonemap_filter()
     else:
-        # Profile 7/8 or plain HDR10: base layer is BT.2020 PQ,
-        # use zscale + tonemap for SDR preview (no libplacebo needed)
-        vf = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+        vf = ("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+              "tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p")
 
     run_ffmpeg([
         "-ss", timestamp,
@@ -359,180 +297,79 @@ def preview_frame(input_path: str, timestamp: str, output_path: str) -> None:
     print(f"  Done! Check {output_path} to verify colors look correct.\n")
 
 
-def _libplacebo_dv_filter() -> str:
-    """libplacebo filter for DV Profile 5 → HDR10 (keeps HDR, just fixes color space)."""
-    return (
-        "libplacebo="
-        "colorspace=bt2020nc:"
-        "color_primaries=bt2020:"
-        "color_trc=smpte2084:"
-        "tonemapping=clip:"
-        "peak_detect=false:"
-        "format=p010le"
-    )
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
-
-def _libplacebo_tonemap_filter() -> str:
-    """libplacebo filter for DV → SDR tone-mapped preview (for PNG output)."""
-    return (
-        "libplacebo="
-        "colorspace=bt709:"
-        "color_primaries=bt709:"
-        "color_trc=bt709:"
-        "tonemapping=hable:"
-        "peak_detect=true:"
-        "format=yuv420p"
-    )
-
-
-def _build_encode_cmd(input_path: str, output_path: str, encoder: str,
+def _build_encode_cmd(input_path: str, output_path: str, encoder: Encoder,
                        meta: HDR10Metadata, options: ConvertOptions,
                        video_only: bool = False,
                        source_bitrate: int | None = None,
                        dv_profile5: bool = False) -> list[str]:
-    """Build the ffmpeg re-encode command.
-
-    input_path: path to the original MKV (DV intact for color conversion) or HEVC file.
-    When video_only=True, outputs raw HEVC with no audio/subs.
-    HDR10 metadata will be added later by mkvmerge.
-    When dv_profile5=True, uses libplacebo to convert IPTPQc2 → BT.2020 PQ.
-    """
-    cmd = ["ffmpeg", "-hide_banner", "-y"]
-
-    # Hardware-accelerated HEVC decoding (auto-select best method on Windows/AMD)
-    cmd += ["-hwaccel", "auto"]
-
+    """Build the ffmpeg re-encode command using the encoder strategy."""
+    cmd = ["ffmpeg", "-hide_banner", "-y", "-hwaccel", "auto"]
     cmd += ["-i", input_path]
     if options.sample_seconds:
         cmd += ["-t", str(options.sample_seconds)]
     cmd += ["-map", "0:v:0"]
 
-    # For DV Profile 5: use libplacebo (Vulkan GPU) to convert IPTPQc2 → BT.2020 PQ
     if dv_profile5:
         cmd += ["-vf", _libplacebo_dv_filter()]
 
-    if encoder == "hevc_amf":
-        preset_cfg = HEVC_AMF_PRESETS.get(options.quality, HEVC_AMF_PRESETS["balanced"])
-        cmd += [
-            "-c:v", "hevc_amf",
-            "-pix_fmt", "p010le",
-            "-quality", preset_cfg["quality"],
-            "-rc", preset_cfg["rc"],
-            "-profile:v", preset_cfg["profile"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        # Bitrate — hevc_amf needs an explicit target, unlike CRF-based encoders
-        bitrate = options.bitrate
-        if not bitrate and source_bitrate:
-            # Use ~80% of source bitrate as target
-            target = int(source_bitrate * 0.8)
-            bitrate = str(target)
-        if not bitrate:
-            # Fallback for files where ffprobe doesn't report video bitrate.
-            # 40M is reasonable for 4K HDR content.
-            bitrate = "40M"
-        cmd += ["-b:v", bitrate]
-
-    elif encoder == "libx265":
-        preset_cfg = LIBX265_PRESETS.get(options.quality, LIBX265_PRESETS["balanced"])
-        crf = options.crf if options.crf is not None else preset_cfg["crf"]
-        x265_params = (
-            f"hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:"
-            f"colormatrix=bt2020nc:master-display={meta.x265_master_display}:"
-            f"max-cll={meta.content_light_level}"
-        )
-        cmd += [
-            "-c:v", "libx265",
-            "-pix_fmt", "p010le",
-            "-preset", preset_cfg["preset"],
-            "-crf", str(crf),
-            "-x265-params", x265_params,
-        ]
-
-    elif encoder == "av1_amf":
-        preset_cfg = AV1_AMF_PRESETS.get(options.quality, AV1_AMF_PRESETS["balanced"])
-        cmd += [
-            "-c:v", "av1_amf",
-            "-pix_fmt", "p010le",
-            "-quality", preset_cfg["quality"],
-            "-rc", preset_cfg["rc"],
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-        bitrate = options.bitrate
-        if not bitrate and source_bitrate:
-            target = int(source_bitrate * 0.8)
-            bitrate = str(target)
-        if not bitrate:
-            bitrate = "40M"
-        cmd += ["-b:v", bitrate]
-
-    elif encoder == "libsvtav1":
-        preset_cfg = LIBSVTAV1_PRESETS.get(options.quality, LIBSVTAV1_PRESETS["balanced"])
-        crf = options.crf if options.crf is not None else preset_cfg["crf"]
-        svtav1_params = (
-            f"color-primaries=9:transfer-characteristics=16:"
-            f"matrix-coefficients=9"
-        )
-        cmd += [
-            "-c:v", "libsvtav1",
-            "-pix_fmt", "yuv420p10le",
-            "-preset", str(preset_cfg["preset"]),
-            "-crf", str(crf),
-            "-svtav1-params", svtav1_params,
-            "-color_primaries", "bt2020",
-            "-color_trc", "smpte2084",
-            "-colorspace", "bt2020nc",
-        ]
-
-    elif encoder == "copy":
-        cmd += ["-c:v", "copy"]
-
-    is_av1 = encoder in ("av1_amf", "libsvtav1")
+    cmd += encoder.build_args(
+        meta, options.quality,
+        crf=options.crf, bitrate=options.bitrate, source_bitrate=source_bitrate,
+    )
 
     if video_only:
-        # Output raw bitstream (no muxing, no audio/subs)
-        cmd += ["-an", "-sn", "-f", "ivf" if is_av1 else "hevc"]
+        cmd += ["-an", "-sn", "-f", encoder.output_format]
     else:
-        # Copy audio and subtitles into final MKV
-        cmd += ["-c:a", "copy", "-c:s", "copy",
-                "-max_muxing_queue_size", "1024"]
+        cmd += ["-c:a", "copy", "-c:s", "copy", "-max_muxing_queue_size", "1024"]
 
     cmd.append(output_path)
     return cmd
 
 
-def _check_disk_space(info: FileInfo, options: ConvertOptions) -> None:
-    """Warn if temp directory doesn't have enough space for intermediate files.
+def _extract_audio_subs(input_path: str, sample_seconds: int, output_path: str) -> None:
+    """Extract truncated audio/subtitle streams to match sample duration."""
+    run_ffmpeg(["-i", input_path, "-t", str(sample_seconds),
+                "-vn", "-c:a", "copy", "-c:s", "copy", output_path])
 
-    Estimates ~2x the source file size for intermediate HEVC + RPU + clean HEVC.
-    For sample mode, scales by the sample fraction.
-    """
-    if not info.overall_bitrate or not info.duration:
-        return
 
-    duration = options.sample_seconds or info.duration
-    source_bytes = (info.overall_bitrate * duration) / 8
-    # Lossless needs ~2x (extracted HEVC + clean HEVC), re-encode needs ~3x
-    estimated_bytes = int(source_bytes * 3)
+def _remux(output_path: str, video_path: str, meta: HDR10Metadata,
+           info: FileInfo, options: ConvertOptions, audio_subs_path: str) -> None:
+    """Remux video + audio/subs into final MKV with HDR10 metadata."""
+    cmd = ["-o", output_path]
+    cmd += meta.mkvmerge_args(track_id=0)
+    cmd.append(video_path)
+    cmd += ["-D"]
+    if options.sample_seconds:
+        cmd.append(audio_subs_path)
+    else:
+        cmd.append(info.path)
+    run_mkvmerge(cmd)
 
-    temp_dir = options.temp_dir or tempfile.gettempdir()
-    try:
-        usage = shutil.disk_usage(temp_dir)
-    except OSError:
-        return
 
-    if usage.free < estimated_bytes:
-        free_str = _format_bytes(usage.free)
-        need_str = _format_bytes(estimated_bytes)
-        print(f"Warning: temp directory may not have enough space "
-              f"(free: {free_str}, estimated need: {need_str})",
-              file=sys.stderr)
-        print(f"  Use --temp-dir to specify a directory with more space.",
-              file=sys.stderr)
+def _parse_meta_with_fallback(rpu_path: str, info: FileInfo) -> HDR10Metadata:
+    """Parse HDR10 metadata from RPU, falling back to ffprobe data."""
+    meta = parse_rpu_metadata(rpu_path)
+    if meta.master_display == DEFAULT_MASTER_DISPLAY and info.master_display:
+        meta = HDR10Metadata(
+            master_display=info.master_display,
+            max_cll=meta.max_cll,
+            max_fall=meta.max_fall,
+        )
+    if info.content_light_level:
+        parts = info.content_light_level.split(",")
+        if len(parts) == 2:
+            probe_cll, probe_fall = int(parts[0]), int(parts[1])
+            if meta.max_cll == DEFAULT_MAX_CLL and probe_cll:
+                meta = HDR10Metadata(
+                    master_display=meta.master_display,
+                    max_cll=probe_cll,
+                    max_fall=probe_fall,
+                )
+    return meta
 
 
 def _build_meta_from_probe(info: FileInfo) -> HDR10Metadata:
@@ -548,9 +385,42 @@ def _build_meta_from_probe(info: FileInfo) -> HDR10Metadata:
     return HDR10Metadata(master_display=master_display, max_cll=max_cll, max_fall=max_fall)
 
 
+def _libplacebo_dv_filter() -> str:
+    return (
+        "libplacebo=colorspace=bt2020nc:color_primaries=bt2020:"
+        "color_trc=smpte2084:tonemapping=clip:peak_detect=false:format=p010le"
+    )
+
+
+def _libplacebo_tonemap_filter() -> str:
+    return (
+        "libplacebo=colorspace=bt709:color_primaries=bt709:"
+        "color_trc=bt709:tonemapping=hable:peak_detect=true:format=yuv420p"
+    )
+
+
+def _check_disk_space(info: FileInfo, options: ConvertOptions) -> None:
+    if not info.overall_bitrate or not info.duration:
+        return
+    duration = options.sample_seconds or info.duration
+    source_bytes = (info.overall_bitrate * duration) / 8
+    estimated_bytes = int(source_bytes * 3)
+    temp_dir = options.temp_dir or tempfile.gettempdir()
+    try:
+        usage = shutil.disk_usage(temp_dir)
+    except OSError:
+        return
+    if usage.free < estimated_bytes:
+        free_str = _format_bytes(usage.free)
+        need_str = _format_bytes(estimated_bytes)
+        print(f"Warning: temp directory may not have enough space "
+              f"(free: {free_str}, estimated need: {need_str})",
+              file=sys.stderr)
+        print(f"  Use --temp-dir to specify a directory with more space.",
+              file=sys.stderr)
+
+
 def _cleanup_temp(tmp_dir: str) -> None:
-    """Remove temp directory and its contents."""
-    import shutil
     try:
         shutil.rmtree(tmp_dir, ignore_errors=True)
     except Exception:
@@ -558,7 +428,6 @@ def _cleanup_temp(tmp_dir: str) -> None:
 
 
 def _format_size(info: FileInfo) -> str:
-    """Format file size estimate from bitrate and duration."""
     if info.overall_bitrate and info.duration:
         size_bytes = (info.overall_bitrate * info.duration) / 8
         return _format_bytes(int(size_bytes))

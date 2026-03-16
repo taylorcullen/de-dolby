@@ -4,9 +4,9 @@ import pytest
 
 from de_dolby.codecs import (
     get_input_codec, get_encoder,
-    HEVCCodec, AV1Codec,
+    HEVCCodec, AV1Codec, HardwareEncoder,
     HevcAmfEncoder, Libx265Encoder, Av1AmfEncoder, LibSvtAv1Encoder, CopyEncoder,
-    INPUT_CODECS, ENCODERS,
+    INPUT_CODECS, ENCODERS, _HDR10_COLOR_ARGS,
 )
 from de_dolby.metadata import HDR10Metadata
 from de_dolby.config import DEFAULT_MASTER_DISPLAY
@@ -154,3 +154,26 @@ class TestEncoders:
             seen.add(codec.name)
             for name in codec.auto_encoder_priority():
                 assert name in ENCODERS, f"{codec.name} encoder {name} not registered"
+
+    def test_hardware_encoders_inherit_base(self):
+        """All GPU encoders should use the HardwareEncoder base class."""
+        hw_names = ["hevc_amf", "av1_amf", "hevc_vaapi", "av1_vaapi", "hevc_nvenc", "av1_nvenc"]
+        for name in hw_names:
+            enc = get_encoder(name)
+            assert isinstance(enc, HardwareEncoder), f"{name} should be a HardwareEncoder"
+
+    def test_hardware_encoders_include_hdr_flags(self):
+        """All hardware encoders should include HDR10 color args."""
+        meta = self._meta()
+        hw_names = ["hevc_amf", "av1_amf", "hevc_vaapi", "av1_vaapi", "hevc_nvenc", "av1_nvenc"]
+        for name in hw_names:
+            args = get_encoder(name).build_args(meta, "balanced", source_bitrate=25000000)
+            assert "-color_primaries" in args, f"{name} missing -color_primaries"
+            assert "bt2020" in args, f"{name} missing bt2020"
+            assert "-b:v" in args, f"{name} missing -b:v"
+
+    def test_cpu_encoders_not_hardware(self):
+        """CPU encoders should NOT be HardwareEncoder subclasses."""
+        for name in ("libx265", "libsvtav1", "copy"):
+            enc = get_encoder(name)
+            assert not isinstance(enc, HardwareEncoder), f"{name} should not be HardwareEncoder"

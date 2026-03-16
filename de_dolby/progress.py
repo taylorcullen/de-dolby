@@ -255,6 +255,11 @@ def parse_ffmpeg_progress(line: str, duration: float | None) -> dict | None:
 def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
                               reporter: ProgressReporter) -> subprocess.CompletedProcess:
     """Run ffmpeg command while parsing stderr for progress updates."""
+    # Import here to avoid circular dependency
+    from de_dolby.tools import _verbose
+    if _verbose:
+        print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,

@@ -268,16 +268,41 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
     )
 
     stderr_data = b""
-    line_buf = b""
+    buf = b""
 
+    # Read in larger chunks instead of byte-by-byte for better performance.
+    # ffmpeg writes progress lines terminated by \r, so we split on both \r and \n.
     while True:
-        chunk = process.stderr.read(1) if process.stderr else b""
+        chunk = process.stderr.read(4096) if process.stderr else b""
         if not chunk:
+            if buf:
+                line = buf.decode(errors="replace").strip()
+                if line:
+                    progress = parse_ffmpeg_progress(line, duration)
+                    if progress:
+                        reporter.update_encoding_progress(
+                            percent=progress.get("percent"),
+                            fps=progress.get("fps"),
+                            speed=progress.get("speed"),
+                            time_str=progress.get("time_str"),
+                        )
             break
         stderr_data += chunk
-        if chunk in (b"\r", b"\n"):
-            line = line_buf.decode(errors="replace").strip()
-            line_buf = b""
+        buf += chunk
+
+        while b"\r" in buf or b"\n" in buf:
+            cr = buf.find(b"\r")
+            lf = buf.find(b"\n")
+            if cr == -1:
+                pos = lf
+            elif lf == -1:
+                pos = cr
+            else:
+                pos = min(cr, lf)
+
+            line = buf[:pos].decode(errors="replace").strip()
+            buf = buf[pos + 1:]
+
             if line:
                 progress = parse_ffmpeg_progress(line, duration)
                 if progress:
@@ -287,8 +312,6 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
                         speed=progress.get("speed"),
                         time_str=progress.get("time_str"),
                     )
-        else:
-            line_buf += chunk
 
     process.wait()
 

@@ -292,20 +292,28 @@ def _pipeline_reencode(info: FileInfo, output_path: str, options: ConvertOptions
 
 
 def preview_frame(input_path: str, timestamp: str, output_path: str) -> None:
-    """Extract a single frame at the given timestamp, applying DV→HDR10 color conversion.
+    """Extract a single frame at the given timestamp, tone-mapped to SDR PNG.
 
-    Uses libplacebo to convert DV IPTPQc2 to BT.2020 PQ, then tone-maps to SDR PNG
-    so the user can quickly check if colors look correct.
+    Detects DV profile to choose the right filter:
+    - Profile 5: uses libplacebo to convert IPTPQc2 → BT.709 SDR
+    - Profile 7/8: uses zscale + tonemap (base layer is already BT.2020 PQ)
+    - No DV: simple zscale + tonemap for standard HDR10
     """
+    info = probe(input_path)
     print(f"\n  Extracting frame at {timestamp} from {input_path}")
     print(f"  Output: {output_path}")
 
-    # Extract one frame using libplacebo for DV color conversion,
-    # then tone-map to SDR so it's viewable as a normal PNG
+    if info.dv_profile == 5:
+        vf = _libplacebo_tonemap_filter()
+    else:
+        # Profile 7/8 or plain HDR10: base layer is BT.2020 PQ,
+        # use zscale + tonemap for SDR preview (no libplacebo needed)
+        vf = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+
     run_ffmpeg([
         "-ss", timestamp,
         "-i", input_path,
-        "-vf", _libplacebo_tonemap_filter(),
+        "-vf", vf,
         "-frames:v", "1",
         "-pix_fmt", "rgb24",
         output_path,

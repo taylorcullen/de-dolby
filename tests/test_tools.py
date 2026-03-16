@@ -1,6 +1,8 @@
-"""Tests for de_dolby.tools — verbose mode, timeouts, and configuration."""
+"""Tests for de_dolby.tools — verbose mode, timeouts, logging, and configuration."""
 
 import subprocess
+import tempfile
+import os
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -94,3 +96,37 @@ class TestCheckAmfSupport:
     @patch("de_dolby.tools._run", side_effect=FileNotFoundError)
     def test_amf_ffmpeg_missing(self, mock_run):
         assert tools.check_amf_support() is False
+
+
+class TestLogFile:
+    def teardown_method(self):
+        tools.configure_log_file(None)
+
+    def test_configure_log_file_creates_file(self, tmp_path):
+        log_path = str(tmp_path / "test.log")
+        tools.configure_log_file(log_path)
+        assert tools._log_file is not None
+        tools.configure_log_file(None)
+
+    def test_log_writes_to_file(self, tmp_path):
+        log_path = str(tmp_path / "test.log")
+        tools.configure_log_file(log_path)
+        tools._log("test message")
+        tools.configure_log_file(None)  # close the file
+        content = open(log_path).read()
+        assert "test message" in content
+
+    @patch("de_dolby.tools.subprocess.run")
+    def test_run_logs_command_and_exit_code(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
+        log_path = str(tmp_path / "test.log")
+        tools.configure_log_file(log_path)
+        tools._run(["echo", "hello"])
+        tools.configure_log_file(None)
+        content = open(log_path).read()
+        assert "$ echo hello" in content
+        assert "exit=0" in content
+
+    def test_configure_log_file_none_disables(self):
+        tools.configure_log_file(None)
+        assert tools._log_file is None

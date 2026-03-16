@@ -109,24 +109,30 @@ def check_tools() -> dict[str, bool]:
     return status
 
 
-def _check_encoder(name: str) -> bool:
-    """Check if ffmpeg supports a given encoder."""
+_encoder_cache: dict[str, bool] = {}
+
+
+def check_encoder_available(name: str) -> bool:
+    """Check if ffmpeg supports a given encoder. Results are cached."""
+    if name in _encoder_cache:
+        return _encoder_cache[name]
     try:
         r = _run([_paths.ffmpeg, "-encoders", "-hide_banner"], check=False)
         output = r.stdout.decode(errors="replace") if r.stdout else ""
-        return name in output
+        available = name in output
     except FileNotFoundError:
-        return False
+        available = False
+    _encoder_cache[name] = available
+    return available
 
 
+# Backwards-compatible aliases
 def check_amf_support() -> bool:
-    """Check if ffmpeg supports hevc_amf encoder."""
-    return _check_encoder("hevc_amf")
+    return check_encoder_available("hevc_amf")
 
 
 def check_av1_amf_support() -> bool:
-    """Check if ffmpeg supports av1_amf encoder."""
-    return _check_encoder("av1_amf")
+    return check_encoder_available("av1_amf")
 
 
 def run_ffprobe(args: list[str]) -> subprocess.CompletedProcess:

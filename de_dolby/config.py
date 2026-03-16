@@ -45,6 +45,32 @@ LIBSVTAV1_PRESETS = {
     "quality": {"preset": 4, "crf": 20},
 }
 
+# VAAPI (Linux AMD/Intel)
+HEVC_VAAPI_PRESETS = {
+    "fast": {"compression_level": 1, "rc_mode": "VBR"},
+    "balanced": {"compression_level": 16, "rc_mode": "VBR"},
+    "quality": {"compression_level": 32, "rc_mode": "VBR"},
+}
+
+AV1_VAAPI_PRESETS = {
+    "fast": {"compression_level": 1, "rc_mode": "VBR"},
+    "balanced": {"compression_level": 16, "rc_mode": "VBR"},
+    "quality": {"compression_level": 32, "rc_mode": "VBR"},
+}
+
+# NVENC (Linux/Windows NVIDIA)
+HEVC_NVENC_PRESETS = {
+    "fast": {"preset": "p4", "tune": "hq", "rc": "vbr"},
+    "balanced": {"preset": "p5", "tune": "hq", "rc": "vbr"},
+    "quality": {"preset": "p7", "tune": "hq", "rc": "vbr"},
+}
+
+AV1_NVENC_PRESETS = {
+    "fast": {"preset": "p4", "tune": "hq", "rc": "vbr"},
+    "balanced": {"preset": "p5", "tune": "hq", "rc": "vbr"},
+    "quality": {"preset": "p7", "tune": "hq", "rc": "vbr"},
+}
+
 # Standard BT.2020 primaries used for HDR10 mastering display fallback
 # Format: G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min) in 1/50000 units for xy, 1/10000 cd/m² for L
 DEFAULT_MASTER_DISPLAY = "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"

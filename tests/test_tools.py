@@ -82,7 +82,13 @@ class TestTimeout:
             tools._run(["sleep", "999"])
 
 
-class TestCheckAmfSupport:
+class TestCheckEncoderAvailable:
+    def setup_method(self):
+        tools._encoder_cache.clear()
+
+    def teardown_method(self):
+        tools._encoder_cache.clear()
+
     @patch("de_dolby.tools._run")
     def test_amf_available(self, mock_run):
         mock_run.return_value = MagicMock(stdout=b"V..... hevc_amf  AMD AMF HEVC encoder")
@@ -96,6 +102,23 @@ class TestCheckAmfSupport:
     @patch("de_dolby.tools._run", side_effect=FileNotFoundError)
     def test_amf_ffmpeg_missing(self, mock_run):
         assert tools.check_amf_support() is False
+
+    @patch("de_dolby.tools._run")
+    def test_vaapi_available(self, mock_run):
+        mock_run.return_value = MagicMock(stdout=b"V..... hevc_vaapi  VAAPI HEVC encoder")
+        assert tools.check_encoder_available("hevc_vaapi") is True
+
+    @patch("de_dolby.tools._run")
+    def test_nvenc_available(self, mock_run):
+        mock_run.return_value = MagicMock(stdout=b"V..... hevc_nvenc  NVENC HEVC encoder")
+        assert tools.check_encoder_available("hevc_nvenc") is True
+
+    @patch("de_dolby.tools._run")
+    def test_result_is_cached(self, mock_run):
+        mock_run.return_value = MagicMock(stdout=b"V..... hevc_amf")
+        tools.check_encoder_available("hevc_amf")
+        tools.check_encoder_available("hevc_amf")
+        assert mock_run.call_count == 1  # Only called once, cached
 
 
 class TestLogFile:

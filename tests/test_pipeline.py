@@ -14,9 +14,15 @@ def test_convert_options_defaults():
     assert opts.crf is None
     assert opts.bitrate is None
     assert opts.sample_seconds is None
+    assert opts.temp_dir is None
     assert opts.dry_run is False
     assert opts.verbose is False
     assert opts.force is False
+
+
+def test_convert_options_temp_dir():
+    opts = ConvertOptions(temp_dir="/tmp/custom")
+    assert opts.temp_dir == "/tmp/custom"
 
 
 def test_format_bytes():

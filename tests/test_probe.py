@@ -180,11 +180,11 @@ def test_format_info():
 # --- Master display parsing tests ---
 
 def test_parse_rational_fraction():
-    assert _parse_rational("34000/50000") == 34000
+    assert abs(_parse_rational("34000/50000") - 0.68) < 0.001
 
 
 def test_parse_rational_integer():
-    assert _parse_rational("1000") == 1000
+    assert _parse_rational("1000") == 1000.0
 
 
 def test_parse_ffprobe_master_display_bt2020():

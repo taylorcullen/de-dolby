@@ -125,37 +125,39 @@ def probe(path: str) -> FileInfo:
     return info
 
 
-def _parse_rational(val: str) -> int:
-    """Parse a rational string like '34000/50000' to the numerator integer."""
-    if "/" in str(val):
-        num, _ = str(val).split("/", 1)
-        return int(num)
-    return int(val)
+def _parse_rational(val: str) -> float:
+    """Parse a rational string like '34000/50000' to a float (0.68)."""
+    s = str(val)
+    if "/" in s:
+        num, den = s.split("/", 1)
+        return int(num) / int(den) if int(den) != 0 else 0.0
+    return float(s)
 
 
 def _parse_ffprobe_master_display(sd: dict) -> str | None:
     """Parse ffprobe mastering display side data to ffmpeg master_display format.
 
-    ffprobe reports: red_x, red_y, green_x, green_y, blue_x, blue_y,
-    white_point_x, white_point_y, min_luminance, max_luminance
-    as rationals like '34000/50000'.
+    ffprobe reports chromaticity and luminance as rationals (e.g. '34000/50000').
+    We evaluate the rational to a float, then scale to the integer format expected
+    by ffmpeg/x265: chromaticity in 1/50000 units, luminance in 1/10000 cd/m².
 
     Returns: G(gx,gy)B(bx,by)R(rx,ry)WP(wpx,wpy)L(lmax,lmin)
-    with chromaticity in 1/50000 units and luminance in 1/10000 cd/m².
     """
     try:
-        gx = _parse_rational(sd["green_x"])
-        gy = _parse_rational(sd["green_y"])
-        bx = _parse_rational(sd["blue_x"])
-        by = _parse_rational(sd["blue_y"])
-        rx = _parse_rational(sd["red_x"])
-        ry = _parse_rational(sd["red_y"])
-        wpx = _parse_rational(sd["white_point_x"])
-        wpy = _parse_rational(sd["white_point_y"])
-        lmax = _parse_rational(sd["max_luminance"])
-        lmin = _parse_rational(sd["min_luminance"])
+        # Chromaticity: evaluate rational → multiply by 50000 → round to int
+        gx = round(_parse_rational(sd["green_x"]) * 50000)
+        gy = round(_parse_rational(sd["green_y"]) * 50000)
+        bx = round(_parse_rational(sd["blue_x"]) * 50000)
+        by = round(_parse_rational(sd["blue_y"]) * 50000)
+        rx = round(_parse_rational(sd["red_x"]) * 50000)
+        ry = round(_parse_rational(sd["red_y"]) * 50000)
+        wpx = round(_parse_rational(sd["white_point_x"]) * 50000)
+        wpy = round(_parse_rational(sd["white_point_y"]) * 50000)
+        # Luminance: evaluate rational → multiply by 10000 → round to int
+        lmax = round(_parse_rational(sd["max_luminance"]) * 10000)
+        lmin = round(_parse_rational(sd["min_luminance"]) * 10000)
         return f"G({gx},{gy})B({bx},{by})R({rx},{ry})WP({wpx},{wpy})L({lmax},{lmin})"
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, ZeroDivisionError):
         return None
 
 

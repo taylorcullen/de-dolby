@@ -12,7 +12,7 @@ from de_dolby import __version__
 from de_dolby.display import display_info
 from de_dolby.pipeline import ConvertOptions, convert, preview_frame
 from de_dolby.probe import probe
-from de_dolby.tools import check_amf_support, configure, configure_log_file, configure_timeout, require_tools
+from de_dolby.tools import check_amf_support, check_av1_amf_support, configure, configure_log_file, configure_timeout, require_tools
 
 
 def _expand_globs(paths: list[str]) -> list[str]:
@@ -70,7 +70,7 @@ def main() -> None:
     p_convert.add_argument("input", nargs="+", metavar="FILE",
                            help="Input MKV file(s) (Dolby Vision)")
     p_convert.add_argument("-o", "--output", help="Output MKV file (single input only)")
-    p_convert.add_argument("--encoder", choices=["auto", "hevc_amf", "libx265", "copy"],
+    p_convert.add_argument("--encoder", choices=["auto", "hevc_amf", "libx265", "av1_amf", "libsvtav1", "copy"],
                            default="auto", help="Video encoder (default: auto)")
     p_convert.add_argument("--quality", choices=["fast", "balanced", "quality"],
                            default="balanced", help="Encoder quality preset (default: balanced)")
@@ -198,6 +198,10 @@ def _cmd_convert(args: argparse.Namespace) -> None:
     if args.encoder == "hevc_amf" and not check_amf_support():
         print("Error: hevc_amf encoder not available. "
               "Use --encoder libx265 for CPU encoding.", file=sys.stderr)
+        sys.exit(1)
+    if args.encoder == "av1_amf" and not check_av1_amf_support():
+        print("Error: av1_amf encoder not available. "
+              "Use --encoder libsvtav1 for CPU AV1 encoding.", file=sys.stderr)
         sys.exit(1)
 
     options = ConvertOptions(

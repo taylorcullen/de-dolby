@@ -24,6 +24,27 @@ LIBX265_PRESETS = {
     "quality": {"preset": "slow", "crf": 16},
 }
 
+AV1_AMF_PRESETS = {
+    "fast": {
+        "quality": "speed",
+        "rc": "vbr_latency",
+    },
+    "balanced": {
+        "quality": "balanced",
+        "rc": "vbr_peak",
+    },
+    "quality": {
+        "quality": "quality",
+        "rc": "vbr_peak",
+    },
+}
+
+LIBSVTAV1_PRESETS = {
+    "fast": {"preset": 8, "crf": 30},
+    "balanced": {"preset": 6, "crf": 25},
+    "quality": {"preset": 4, "crf": 20},
+}
+
 # Standard BT.2020 primaries used for HDR10 mastering display fallback
 # Format: G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min) in 1/50000 units for xy, 1/10000 cd/m² for L
 DEFAULT_MASTER_DISPLAY = "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"

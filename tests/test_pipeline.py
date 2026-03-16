@@ -149,3 +149,63 @@ def test_check_disk_space_skips_without_bitrate(capsys):
     _check_disk_space(info, opts)
     captured = capsys.readouterr()
     assert captured.err == ""
+
+
+# --- AV1 encoder tests ---
+
+def test_build_encode_cmd_av1_amf():
+    meta = HDR10Metadata(master_display=DEFAULT_MASTER_DISPLAY, max_cll=1000, max_fall=400)
+    opts = ConvertOptions(encoder="av1_amf", quality="balanced")
+    cmd = _build_encode_cmd("input.mkv", "output.ivf", "av1_amf", meta, opts,
+                            video_only=True, source_bitrate=25000000)
+    idx = cmd.index("-c:v")
+    assert cmd[idx + 1] == "av1_amf"
+    assert "-b:v" in cmd
+    assert "-f" in cmd
+    fidx = cmd.index("-f")
+    assert cmd[fidx + 1] == "ivf"
+
+
+def test_build_encode_cmd_av1_amf_bitrate_fallback():
+    """av1_amf should get 40M fallback like hevc_amf."""
+    meta = HDR10Metadata(master_display=DEFAULT_MASTER_DISPLAY, max_cll=1000, max_fall=400)
+    opts = ConvertOptions(encoder="av1_amf", quality="balanced")
+    cmd = _build_encode_cmd("input.mkv", "output.ivf", "av1_amf", meta, opts,
+                            video_only=True, source_bitrate=None)
+    idx = cmd.index("-b:v")
+    assert cmd[idx + 1] == "40M"
+
+
+def test_build_encode_cmd_libsvtav1():
+    meta = HDR10Metadata(master_display=DEFAULT_MASTER_DISPLAY, max_cll=1000, max_fall=400)
+    opts = ConvertOptions(encoder="libsvtav1", quality="quality")
+    cmd = _build_encode_cmd("input.mkv", "output.ivf", "libsvtav1", meta, opts,
+                            video_only=True)
+    idx = cmd.index("-c:v")
+    assert cmd[idx + 1] == "libsvtav1"
+    assert "-crf" in cmd
+    assert "-svtav1-params" in cmd
+    assert "-preset" in cmd
+    fidx = cmd.index("-f")
+    assert cmd[fidx + 1] == "ivf"
+
+
+def test_build_encode_cmd_libsvtav1_crf_override():
+    meta = HDR10Metadata(master_display=DEFAULT_MASTER_DISPLAY, max_cll=1000, max_fall=400)
+    opts = ConvertOptions(encoder="libsvtav1", quality="balanced", crf=30)
+    cmd = _build_encode_cmd("input.mkv", "output.ivf", "libsvtav1", meta, opts,
+                            video_only=True)
+    idx = cmd.index("-crf")
+    assert cmd[idx + 1] == "30"
+
+
+def test_build_encode_cmd_libsvtav1_hdr_color_flags():
+    meta = HDR10Metadata(master_display=DEFAULT_MASTER_DISPLAY, max_cll=1000, max_fall=400)
+    opts = ConvertOptions(encoder="libsvtav1", quality="balanced")
+    cmd = _build_encode_cmd("input.mkv", "output.ivf", "libsvtav1", meta, opts,
+                            video_only=True)
+    assert "-color_primaries" in cmd
+    idx = cmd.index("-color_primaries")
+    assert cmd[idx + 1] == "bt2020"
+    idx = cmd.index("-color_trc")
+    assert cmd[idx + 1] == "smpte2084"

@@ -100,7 +100,7 @@ def main() -> None:
 
     if not args.command:
         parser.print_help()
-        sys.exit(1)
+        sys.exit(2)
 
     # Configure tool paths
     configure(
@@ -162,7 +162,7 @@ def _cmd_convert(args: argparse.Namespace) -> None:
     if args.output and multiple:
         print("Error: -o/--output cannot be used with multiple input files.",
               file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
 
     options = ConvertOptions(
         encoder=args.encoder,

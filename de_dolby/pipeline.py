@@ -5,7 +5,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from de_dolby.config import HEVC_AMF_PRESETS, LIBX265_PRESETS
+from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, HEVC_AMF_PRESETS, LIBX265_PRESETS
 from de_dolby.display import display_banner
 from de_dolby.metadata import HDR10Metadata, extract_rpu, parse_rpu_metadata
 from de_dolby.probe import FileInfo, probe
@@ -117,10 +117,28 @@ def _pipeline_lossless(info: FileInfo, output_path: str, options: ConvertOptions
             extract_rpu(hevc_path, rpu_path)
         progress.complete_step()
 
-        # Step 4: Parse HDR10 metadata from RPU
+        # Step 4: Parse HDR10 metadata from RPU, with ffprobe fallback
         progress.begin_step("parse_meta")
         if not options.dry_run:
             meta = parse_rpu_metadata(rpu_path)
+            # Use ffprobe-sourced master display if dovi_tool didn't provide one
+            if meta.master_display == DEFAULT_MASTER_DISPLAY and info.master_display:
+                meta = HDR10Metadata(
+                    master_display=info.master_display,
+                    max_cll=meta.max_cll,
+                    max_fall=meta.max_fall,
+                )
+            # Use ffprobe-sourced content light level if RPU didn't have L6
+            if info.content_light_level:
+                parts = info.content_light_level.split(",")
+                if len(parts) == 2:
+                    probe_cll, probe_fall = int(parts[0]), int(parts[1])
+                    if meta.max_cll == DEFAULT_MAX_CLL and probe_cll:
+                        meta = HDR10Metadata(
+                            master_display=meta.master_display,
+                            max_cll=probe_cll,
+                            max_fall=probe_fall,
+                        )
         else:
             meta = HDR10Metadata(master_display="", max_cll=0, max_fall=0)
         progress.complete_step()

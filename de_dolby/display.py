@@ -9,18 +9,27 @@ from de_dolby.probe import FileInfo
 from de_dolby.utils import Colors as _C
 
 
-# ASCII art logo lines (each line must be the same character width)
-_LOGO_LINES = [
-    "██████╗ ███████╗      ██████╗  ██████╗  ",
-    "██╔══██╗██╔════╝      ██╔══██╗██╔═══██╗ ",
-    "██║  ██║█████╗  █████╗██║  ██║██║   ██║ ",
-    "██║  ██║██╔══╝  ╚════╝██║  ██║██║   ██║ ",
-    "██████╔╝███████╗      ██████╔╝╚██████╔╝ ",
-    "╚═════╝ ╚══════╝      ╚═════╝  ╚═════╝  ",
+# Logo: DV ═══▶ HDR10
+# Each line is a list of (color, text) segments for per-character coloring.
+_LOGO_SEGMENTS: list[list[tuple[str, str]]] = [
+    [("M", "██████╗ ██╗   ██╗"), ("W", " ██████╗ "), ("G", "██╗  ██╗██████╗ ██████╗  ██╗ ██████╗ ")],
+    [("M", "██╔══██╗██║   ██║"), ("W", " ╚════██╗"), ("G", "██║  ██║██╔══██╗██╔══██╗███║██╔═████╗")],
+    [("M", "██║  ██║██║   ██║"), ("W", "  █████╔╝"), ("G", "███████║██║  ██║██████╔╝╚██║██║██╔██║")],
+    [("M", "██║  ██║╚██╗ ██╔╝"), ("W", " ██╔═══╝ "), ("G", "██╔══██║██║  ██║██╔══██╗ ██║████╔╝██║")],
+    [("M", "██████╔╝ ╚████╔╝ "), ("W", " ███████╗"), ("G", "██║  ██║██████╔╝██║  ██║ ██║╚██████╔╝")],
+    [("M", "╚═════╝   ╚═══╝  "), ("W", " ╚══════╝"), ("G", "╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝ ╚═╝ ╚═════╝ ")],
 ]
 
-# Computed from the actual logo lines (all must be equal)
-_LOGO_WIDTH = len(_LOGO_LINES[0])
+# Plain-text width of each logo line (all must be equal)
+_LOGO_WIDTH = sum(len(seg[1]) for seg in _LOGO_SEGMENTS[0])
+
+
+def _render_logo_line(segments: list[tuple[str, str]]) -> tuple[str, str]:
+    """Render a logo line with ANSI colors. Returns (plain_text, colored_text)."""
+    color_map = {"W": _C.WHITE, "R": _C.RED, "M": _C.BRIGHT_MAGENTA, "G": _C.BRIGHT_GREEN}
+    plain = "".join(text for _, text in segments)
+    colored = "".join(f"{color_map.get(c, '')}{text}{_C.RESET}" for c, text in segments)
+    return plain, colored
 
 
 from de_dolby.utils import format_bytes as _format_bytes, format_duration as _format_duration
@@ -204,13 +213,14 @@ def display_banner(info: FileInfo, output_path: str | None = None,
     lines: list[str] = [""]
     lines.append(hline("╭", "─", "╮"))
 
-    # Logo (centered)
+    # Logo (centered, with per-segment coloring)
     content_width = inner - 2  # usable width between the margin spaces
-    for logo_line in _LOGO_LINES:
-        pad_l = (content_width - _LOGO_WIDTH) // 2
-        pad_r = content_width - _LOGO_WIDTH - pad_l
-        colored = f"{' ' * pad_l}{_C.BRIGHT_MAGENTA}{logo_line}{_C.RESET}{' ' * pad_r}"
-        lines.append(box_line_plain("x" * content_width, content_width, colored))
+    for segments in _LOGO_SEGMENTS:
+        plain, colored = _render_logo_line(segments)
+        pad_l = (content_width - len(plain)) // 2
+        pad_r = content_width - len(plain) - pad_l
+        colored_padded = f"{' ' * pad_l}{colored}{' ' * pad_r}"
+        lines.append(box_line_plain("x" * content_width, content_width, colored_padded))
 
     # Version centered
     pad_l = (content_width - len(version_line)) // 2

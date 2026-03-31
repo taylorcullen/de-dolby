@@ -398,8 +398,14 @@ Use the provided Docker image for a containerized environment:
 # Build the image
 docker build -t de-dolby .
 
-# Run a conversion
+# Run a conversion (Linux/macOS)
 docker run --rm -v $(pwd)/videos:/videos de-dolby convert /videos/movie.mkv
+
+# Run a conversion (Windows PowerShell)
+docker run --rm -v "${PWD}/videos:/videos" de-dolby convert /videos/movie.mkv
+
+# Run a conversion (Windows Git Bash)
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/videos:/videos" de-dolby convert /videos/movie.mkv
 
 # Using docker-compose
 docker-compose run --rm de-dolby convert /videos/movie.mkv

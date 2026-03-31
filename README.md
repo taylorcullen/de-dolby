@@ -423,7 +423,13 @@ docker-compose run --rm de-dolby convert /videos/movie.mkv
 | `gpu` | GPU-accelerated (VAAPI) | `docker-compose --profile gpu run de-dolby-gpu` |
 | `dev` | Development shell | `docker-compose --profile dev run de-dolby-dev` |
 
-**GPU passthrough (AMD/Intel via VAAPI):**
+**Windows-specific notes:**
+
+- GPU passthrough (`--device /dev/dri`) only works on Linux Docker hosts
+- On Windows Docker Desktop, use CPU encoding (`--encoder libx265`) or skip the `--device` flag
+- Always quote paths with spaces: `"/videos/movie file.mkv"`
+
+**Linux GPU passthrough (AMD/Intel via VAAPI):**
 
 ```bash
 docker run --rm --device /dev/dri:/dev/dri \

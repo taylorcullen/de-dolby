@@ -10,16 +10,21 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from de_dolby.config import (
-    AV1_AMF_PRESETS, AV1_NVENC_PRESETS, AV1_VAAPI_PRESETS,
-    HEVC_AMF_PRESETS, HEVC_NVENC_PRESETS, HEVC_VAAPI_PRESETS,
-    LIBSVTAV1_PRESETS, LIBX265_PRESETS,
+    AV1_AMF_PRESETS,
+    AV1_NVENC_PRESETS,
+    AV1_VAAPI_PRESETS,
+    HEVC_AMF_PRESETS,
+    HEVC_NVENC_PRESETS,
+    HEVC_VAAPI_PRESETS,
+    LIBSVTAV1_PRESETS,
+    LIBX265_PRESETS,
 )
 from de_dolby.metadata import HDR10Metadata
-
 
 # ---------------------------------------------------------------------------
 # Input codec strategies
 # ---------------------------------------------------------------------------
+
 
 class InputCodec(ABC):
     """How to extract, probe RPU, and strip DV from a given input codec."""
@@ -116,7 +121,7 @@ def get_input_codec(codec_name: str) -> InputCodec:
     """Look up the InputCodec strategy for a given ffprobe codec name."""
     codec = INPUT_CODECS.get(codec_name)
     if codec is None:
-        supported = ", ".join(sorted(set(c.name for c in INPUT_CODECS.values())))
+        supported = ", ".join(sorted({c.name for c in INPUT_CODECS.values()}))
         raise RuntimeError(f"Video codec is {codec_name}, expected {supported}")
     return codec
 
@@ -127,14 +132,16 @@ def get_input_codec(codec_name: str) -> InputCodec:
 
 # Shared HDR10 color flags appended by all hardware encoders
 _HDR10_COLOR_ARGS = [
-    "-color_primaries", "bt2020",
-    "-color_trc", "smpte2084",
-    "-colorspace", "bt2020nc",
+    "-color_primaries",
+    "bt2020",
+    "-color_trc",
+    "smpte2084",
+    "-colorspace",
+    "bt2020nc",
 ]
 
 
-def _resolve_bitrate(bitrate: str | None, source_bitrate: int | None,
-                     fallback: str = "40M") -> str:
+def _resolve_bitrate(bitrate: str | None, source_bitrate: int | None, fallback: str = "40M") -> str:
     """Shared bitrate resolution for hardware encoders."""
     if bitrate:
         return bitrate
@@ -172,9 +179,14 @@ class Encoder(ABC):
         return ".ivf" if self.codec_family == "av1" else ".hevc"
 
     @abstractmethod
-    def build_args(self, meta: HDR10Metadata, quality: str,
-                   crf: int | None = None, bitrate: str | None = None,
-                   source_bitrate: int | None = None) -> list[str]:
+    def build_args(
+        self,
+        meta: HDR10Metadata,
+        quality: str,
+        crf: int | None = None,
+        bitrate: str | None = None,
+        source_bitrate: int | None = None,
+    ) -> list[str]:
         """Build encoder-specific ffmpeg arguments (after -map, before output)."""
 
 
@@ -198,6 +210,7 @@ class CopyEncoder(Encoder):
 # ---------------------------------------------------------------------------
 # Hardware encoder base class — handles HDR color flags and bitrate
 # ---------------------------------------------------------------------------
+
 
 class HardwareEncoder(Encoder):
     """Base for hardware GPU encoders (AMF, VAAPI, NVENC).
@@ -243,6 +256,7 @@ class HardwareEncoder(Encoder):
 # AMF encoders (Windows AMD)
 # ---------------------------------------------------------------------------
 
+
 class HevcAmfEncoder(HardwareEncoder):
     @property
     def ffmpeg_name(self) -> str:
@@ -261,8 +275,7 @@ class HevcAmfEncoder(HardwareEncoder):
         return HEVC_AMF_PRESETS
 
     def _encoder_args(self, preset):
-        return ["-quality", preset["quality"], "-rc", preset["rc"],
-                "-profile:v", preset["profile"]]
+        return ["-quality", preset["quality"], "-rc", preset["rc"], "-profile:v", preset["profile"]]
 
 
 class Av1AmfEncoder(HardwareEncoder):
@@ -290,6 +303,7 @@ class Av1AmfEncoder(HardwareEncoder):
 # VAAPI encoders (Linux AMD/Intel)
 # ---------------------------------------------------------------------------
 
+
 class HevcVaapiEncoder(HardwareEncoder):
     @property
     def ffmpeg_name(self) -> str:
@@ -311,9 +325,14 @@ class HevcVaapiEncoder(HardwareEncoder):
         return ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=p010,hwupload"]
 
     def _encoder_args(self, preset):
-        return ["-profile:v", "main10",
-                "-compression_level", str(preset["compression_level"]),
-                "-rc_mode", preset["rc_mode"]]
+        return [
+            "-profile:v",
+            "main10",
+            "-compression_level",
+            str(preset["compression_level"]),
+            "-rc_mode",
+            preset["rc_mode"],
+        ]
 
 
 class Av1VaapiEncoder(HardwareEncoder):
@@ -337,13 +356,18 @@ class Av1VaapiEncoder(HardwareEncoder):
         return ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=p010,hwupload"]
 
     def _encoder_args(self, preset):
-        return ["-compression_level", str(preset["compression_level"]),
-                "-rc_mode", preset["rc_mode"]]
+        return [
+            "-compression_level",
+            str(preset["compression_level"]),
+            "-rc_mode",
+            preset["rc_mode"],
+        ]
 
 
 # ---------------------------------------------------------------------------
 # NVENC encoders (NVIDIA, Linux/Windows)
 # ---------------------------------------------------------------------------
+
 
 class HevcNvencEncoder(HardwareEncoder):
     @property
@@ -363,8 +387,16 @@ class HevcNvencEncoder(HardwareEncoder):
         return HEVC_NVENC_PRESETS
 
     def _encoder_args(self, preset):
-        return ["-preset:v", preset["preset"], "-tune:v", preset["tune"],
-                "-rc:v", preset["rc"], "-profile:v", "main10"]
+        return [
+            "-preset:v",
+            preset["preset"],
+            "-tune:v",
+            preset["tune"],
+            "-rc:v",
+            preset["rc"],
+            "-profile:v",
+            "main10",
+        ]
 
 
 class Av1NvencEncoder(HardwareEncoder):
@@ -385,13 +417,13 @@ class Av1NvencEncoder(HardwareEncoder):
         return AV1_NVENC_PRESETS
 
     def _encoder_args(self, preset):
-        return ["-preset:v", preset["preset"], "-tune:v", preset["tune"],
-                "-rc:v", preset["rc"]]
+        return ["-preset:v", preset["preset"], "-tune:v", preset["tune"], "-rc:v", preset["rc"]]
 
 
 # ---------------------------------------------------------------------------
 # CPU encoders (all platforms)
 # ---------------------------------------------------------------------------
+
 
 class Libx265Encoder(Encoder):
     @property
@@ -415,11 +447,16 @@ class Libx265Encoder(Encoder):
             f"max-cll={meta.content_light_level}"
         )
         return [
-            "-c:v", "libx265",
-            "-pix_fmt", "p010le",
-            "-preset", preset["preset"],
-            "-crf", str(resolved_crf),
-            "-x265-params", x265_params,
+            "-c:v",
+            "libx265",
+            "-pix_fmt",
+            "p010le",
+            "-preset",
+            preset["preset"],
+            "-crf",
+            str(resolved_crf),
+            "-x265-params",
+            x265_params,
         ]
 
 
@@ -440,11 +477,16 @@ class LibSvtAv1Encoder(Encoder):
         preset = LIBSVTAV1_PRESETS.get(quality, LIBSVTAV1_PRESETS["balanced"])
         resolved_crf = crf if crf is not None else preset["crf"]
         return [
-            "-c:v", "libsvtav1",
-            "-pix_fmt", "yuv420p10le",
-            "-preset", str(preset["preset"]),
-            "-crf", str(resolved_crf),
-            "-svtav1-params", "color-primaries=9:transfer-characteristics=16:matrix-coefficients=9",
+            "-c:v",
+            "libsvtav1",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-preset",
+            str(preset["preset"]),
+            "-crf",
+            str(resolved_crf),
+            "-svtav1-params",
+            "color-primaries=9:transfer-characteristics=16:matrix-coefficients=9",
         ] + _HDR10_COLOR_ARGS
 
 

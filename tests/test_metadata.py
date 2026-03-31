@@ -1,6 +1,6 @@
 """Tests for de_dolby.metadata."""
 
-from de_dolby.metadata import HDR10Metadata, _parse_export_data, _find_l6
+from de_dolby.metadata import HDR10Metadata, _find_l6, _parse_export_data
 
 
 def test_hdr10_metadata_content_light_level():
@@ -64,23 +64,33 @@ def test_find_l6_direct():
 
 
 def test_find_l6_nested_dm_data():
-    rpu = {"dm_data": {"level6": {"max_content_light_level": 500, "max_frame_average_light_level": 100}}}
+    rpu = {
+        "dm_data": {
+            "level6": {"max_content_light_level": 500, "max_frame_average_light_level": 100}
+        }
+    }
     l6 = _find_l6(rpu)
     assert l6 is not None
     assert l6["max_content_light_level"] == 500
 
 
 def test_find_l6_cmv40():
-    rpu = {"cmv40": {"level6": {"max_content_light_level": 600, "max_frame_average_light_level": 150}}}
+    rpu = {
+        "cmv40": {"level6": {"max_content_light_level": 600, "max_frame_average_light_level": 150}}
+    }
     l6 = _find_l6(rpu)
     assert l6 is not None
     assert l6["max_content_light_level"] == 600
 
 
 def test_find_l6_cmv40_metadata_blocks():
-    rpu = {"cmv40": {"metadata_blocks": [
-        {"max_content_light_level": 700, "max_frame_average_light_level": 250}
-    ]}}
+    rpu = {
+        "cmv40": {
+            "metadata_blocks": [
+                {"max_content_light_level": 700, "max_frame_average_light_level": 250}
+            ]
+        }
+    }
     l6 = _find_l6(rpu)
     assert l6 is not None
     assert l6["max_content_light_level"] == 700
@@ -99,7 +109,11 @@ def test_parse_export_data_with_l6_list():
 
 
 def test_parse_export_data_with_rpus_key():
-    data = {"rpus": [{"level6": {"max_content_light_level": 1200, "max_frame_average_light_level": 500}}]}
+    data = {
+        "rpus": [
+            {"level6": {"max_content_light_level": 1200, "max_frame_average_light_level": 500}}
+        ]
+    }
     meta = _parse_export_data(data)
     assert meta.max_cll == 1200
     assert meta.max_fall == 500

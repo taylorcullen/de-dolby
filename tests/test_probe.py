@@ -1,9 +1,16 @@
 """Tests for de_dolby.probe — uses mocked ffprobe output."""
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from de_dolby.probe import probe, format_info, StreamInfo, FileInfo, _parse_ffprobe_master_display, _parse_rational
+from de_dolby.probe import (
+    FileInfo,
+    StreamInfo,
+    _parse_ffprobe_master_display,
+    _parse_rational,
+    format_info,
+    probe,
+)
 
 
 def _mock_ffprobe_result(data: dict) -> MagicMock:
@@ -163,12 +170,16 @@ def test_format_info():
         dv_profile=7,
         has_hdr10=True,
         video_streams=[
-            StreamInfo(index=0, codec_type="video", codec_name="hevc",
-                       width=3840, height=2160, frame_rate="24000/1001")
+            StreamInfo(
+                index=0,
+                codec_type="video",
+                codec_name="hevc",
+                width=3840,
+                height=2160,
+                frame_rate="24000/1001",
+            )
         ],
-        audio_streams=[
-            StreamInfo(index=1, codec_type="audio", codec_name="eac3", language="eng")
-        ],
+        audio_streams=[StreamInfo(index=1, codec_type="audio", codec_name="eac3", language="eng")],
     )
     text = format_info(info)
     assert "test.mkv" in text
@@ -178,6 +189,7 @@ def test_format_info():
 
 
 # --- Master display parsing tests ---
+
 
 def test_parse_rational_fraction():
     assert abs(_parse_rational("34000/50000") - 0.68) < 0.001
@@ -189,11 +201,16 @@ def test_parse_rational_integer():
 
 def test_parse_ffprobe_master_display_bt2020():
     sd = {
-        "red_x": "34000/50000", "red_y": "16000/50000",
-        "green_x": "13250/50000", "green_y": "34500/50000",
-        "blue_x": "7500/50000", "blue_y": "3000/50000",
-        "white_point_x": "15635/50000", "white_point_y": "16450/50000",
-        "min_luminance": "1/10000", "max_luminance": "10000000/10000",
+        "red_x": "34000/50000",
+        "red_y": "16000/50000",
+        "green_x": "13250/50000",
+        "green_y": "34500/50000",
+        "blue_x": "7500/50000",
+        "blue_y": "3000/50000",
+        "white_point_x": "15635/50000",
+        "white_point_y": "16450/50000",
+        "min_luminance": "1/10000",
+        "max_luminance": "10000000/10000",
     }
     result = _parse_ffprobe_master_display(sd)
     assert result is not None
@@ -212,24 +229,35 @@ def test_probe_extracts_master_display(mock_ffprobe):
     """Master display from stream side data gets stored in FileInfo."""
     data = {
         "format": {"duration": "100"},
-        "streams": [{
-            "index": 0, "codec_type": "video", "codec_name": "hevc",
-            "disposition": {"default": 1}, "tags": {},
-            "side_data_list": [
-                {
-                    "side_data_type": "Mastering display metadata",
-                    "red_x": "34000/50000", "red_y": "16000/50000",
-                    "green_x": "13250/50000", "green_y": "34500/50000",
-                    "blue_x": "7500/50000", "blue_y": "3000/50000",
-                    "white_point_x": "15635/50000", "white_point_y": "16450/50000",
-                    "min_luminance": "1/10000", "max_luminance": "10000000/10000",
-                },
-                {
-                    "side_data_type": "Content light level metadata",
-                    "max_content": 1000, "max_average": 400,
-                },
-            ],
-        }],
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "hevc",
+                "disposition": {"default": 1},
+                "tags": {},
+                "side_data_list": [
+                    {
+                        "side_data_type": "Mastering display metadata",
+                        "red_x": "34000/50000",
+                        "red_y": "16000/50000",
+                        "green_x": "13250/50000",
+                        "green_y": "34500/50000",
+                        "blue_x": "7500/50000",
+                        "blue_y": "3000/50000",
+                        "white_point_x": "15635/50000",
+                        "white_point_y": "16450/50000",
+                        "min_luminance": "1/10000",
+                        "max_luminance": "10000000/10000",
+                    },
+                    {
+                        "side_data_type": "Content light level metadata",
+                        "max_content": 1000,
+                        "max_average": 400,
+                    },
+                ],
+            }
+        ],
         "frames": [],
     }
     mock_ffprobe.return_value = _mock_ffprobe_result(data)
@@ -243,11 +271,175 @@ def test_probe_extracts_master_display(mock_ffprobe):
 def test_probe_no_master_display(mock_ffprobe):
     data = {
         "format": {"duration": "100"},
-        "streams": [{"index": 0, "codec_type": "video", "codec_name": "hevc",
-                      "disposition": {"default": 1}, "tags": {}}],
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "hevc",
+                "disposition": {"default": 1},
+                "tags": {},
+            }
+        ],
         "frames": [],
     }
     mock_ffprobe.return_value = _mock_ffprobe_result(data)
     info = probe("test.mkv")
     assert info.master_display is None
     assert info.content_light_level is None
+
+
+def test_stream_info_to_dict_video():
+    """Test StreamInfo.to_dict() for video stream."""
+    si = StreamInfo(
+        index=0,
+        codec_type="video",
+        codec_name="hevc",
+        width=3840,
+        height=2160,
+        pix_fmt="yuv420p10le",
+        bit_depth=10,
+        color_transfer="smpte2084",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+        frame_rate="24000/1001",
+        bitrate=20000000,
+    )
+    d = si.to_dict()
+    assert d["index"] == 0
+    assert d["codec"] == "hevc"
+    assert d["width"] == 3840
+    assert d["height"] == 2160
+    assert d["pix_fmt"] == "yuv420p10le"
+    assert d["bit_depth"] == 10
+    assert d["color_transfer"] == "smpte2084"
+    assert d["bitrate_kbps"] == 20000
+
+
+def test_stream_info_to_dict_audio():
+    """Test StreamInfo.to_dict() for audio stream."""
+    si = StreamInfo(
+        index=1,
+        codec_type="audio",
+        codec_name="eac3",
+        language="eng",
+        title="English Dolby Digital+",
+        default=True,
+        bitrate=768000,
+    )
+    d = si.to_dict()
+    assert d["index"] == 1
+    assert d["codec"] == "eac3"
+    assert d["language"] == "eng"
+    assert d["title"] == "English Dolby Digital+"
+    assert d["default"] is True
+    assert d["bitrate_kbps"] == 768
+
+
+def test_stream_info_to_dict_subtitle():
+    """Test StreamInfo.to_dict() for subtitle stream."""
+    si = StreamInfo(
+        index=2,
+        codec_type="subtitle",
+        codec_name="subrip",
+        language="eng",
+        title="English (SDH)",
+        default=False,
+    )
+    d = si.to_dict()
+    assert d["index"] == 2
+    assert d["codec"] == "subrip"
+    assert d["language"] == "eng"
+    assert d["title"] == "English (SDH)"
+    assert d["default"] is False
+
+
+@patch("de_dolby.probe.run_ffprobe")
+def test_file_info_to_dict(mock_ffprobe, tmp_path):
+    """Test FileInfo.to_dict() serialization."""
+    data = {
+        "format": {
+            "duration": "8130.5",
+            "bit_rate": "25000000",
+        },
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "hevc",
+                "width": 3840,
+                "height": 2160,
+                "pix_fmt": "yuv420p10le",
+                "color_transfer": "smpte2084",
+                "color_primaries": "bt2020",
+                "color_space": "bt2020nc",
+                "r_frame_rate": "24000/1001",
+                "bit_rate": "20000000",
+                "disposition": {"default": 1},
+                "tags": {},
+                "side_data_list": [
+                    {
+                        "side_data_type": "DOVI configuration record",
+                        "dv_profile": 7,
+                        "dv_bl_signal_compatibility_id": 6,
+                    },
+                    {
+                        "side_data_type": "Content light level metadata",
+                        "max_content": 1000,
+                        "max_average": 400,
+                    },
+                ],
+            },
+            {
+                "index": 1,
+                "codec_type": "audio",
+                "codec_name": "eac3",
+                "bit_rate": "768000",
+                "disposition": {"default": 1},
+                "tags": {"language": "eng", "title": "English Dolby Digital+"},
+            },
+            {
+                "index": 2,
+                "codec_type": "subtitle",
+                "codec_name": "subrip",
+                "disposition": {"default": 0},
+                "tags": {"language": "eng", "title": "English (SDH)"},
+            },
+        ],
+        "frames": [],
+    }
+    mock_ffprobe.return_value = _mock_ffprobe_result(data)
+
+    # Create a temporary file so Path.exists() works
+    test_file = tmp_path / "test.mkv"
+    test_file.write_text("dummy")
+
+    info = probe(str(test_file))
+    d = info.to_dict()
+
+    # Check basic fields
+    assert d["file"] == str(test_file)
+    assert d["duration_seconds"] == 8130.5
+    assert d["duration_formatted"] == "2:15:30"
+    assert d["bitrate_kbps"] == 25000
+    assert d["size_bytes"] == 5  # "dummy" is 5 bytes
+
+    # Check Dolby Vision
+    assert d["dolby_vision"]["profile"] == 7
+    assert d["dolby_vision"]["bl_signal_compatibility_id"] == 6
+
+    # Check HDR10
+    assert d["hdr10"]["detected"] is True
+    assert d["hdr10"]["max_cll"] == 1000
+    assert d["hdr10"]["max_fall"] == 400
+
+    # Check streams
+    assert len(d["video"]) == 1
+    assert d["video"][0]["codec"] == "hevc"
+    assert d["video"][0]["width"] == 3840
+
+    assert len(d["audio"]) == 1
+    assert d["audio"][0]["codec"] == "eac3"
+    assert d["audio"][0]["language"] == "eng"
+
+    assert len(d["subtitles"]) == 1
+    assert d["subtitles"][0]["codec"] == "subrip"

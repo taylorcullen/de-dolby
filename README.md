@@ -86,9 +86,164 @@ de-dolby convert movie.mkv --sample 30
 # Show file info (DV profile, streams, HDR metadata)
 de-dolby info movie.mkv
 
+# Show file info as JSON for scripting
+de-dolby info movie.mkv --json
+de-dolby info movie.mkv --json --pretty
+
+# Estimate conversion without executing
+de-dolby estimate movie.mkv
+de-dolby estimate movie.mkv --encoder hevc_amf --quality quality
+
 # Extract a tone-mapped SDR frame for visual check
 de-dolby preview movie.mkv --time 00:05:00
 ```
+
+---
+
+## Advanced Features
+
+### Configuration File
+
+Create a config file to set persistent defaults:
+
+```bash
+# Create example config file
+de-dolby config --init
+
+# View current config
+de-dolby config --show
+```
+
+**Config file locations:**
+- **Windows:** `%APPDATA%\de-dolby\config.toml`
+- **Linux/macOS:** `~/.config/de-dolby/config.toml`
+
+**Example config.toml:**
+
+```toml
+[defaults]
+encoder = "auto"        # auto, hevc_amf, libx265, av1_amf, libsvtav1, copy
+quality = "balanced"    # fast, balanced, quality
+crf = 18                # CRF for libx265 (0-51, lower is better)
+bitrate = "40M"         # Target bitrate for hardware encoders
+output_dir = "~/Videos/HDR10"
+temp_dir = "/tmp"
+workers = 4
+verbose = false
+force = false
+
+[tool_paths]
+# Optional: override tool paths if not in PATH
+# ffmpeg = "C:/Tools/ffmpeg.exe"
+# dovi_tool = "C:/Tools/dovi_tool.exe"
+# mkvmerge = "C:/Tools/mkvmerge.exe"
+
+[tracks]
+# Keep only these audio languages (empty = keep all)
+audio_languages = ["eng", "jpn"]
+# Skip subtitle tracks entirely
+skip_subtitles = false
+```
+
+### Track Selection
+
+Filter audio and subtitle tracks during conversion:
+
+```bash
+# Keep only specific audio languages
+de-dolby convert movie.mkv --audio-lang eng,jpn
+
+# Keep only specific subtitle languages
+de-dolby convert movie.mkv --subtitle-lang eng
+
+# Strip all audio tracks (video only)
+de-dolby convert movie.mkv --no-audio
+
+# Strip all subtitle tracks
+de-dolby convert movie.mkv --no-subtitles
+
+# Disable safety defaults (keep-first options)
+de-dolby convert movie.mkv --audio-lang eng --no-keep-first-audio
+```
+
+**Safety defaults:** By default, the first audio and first subtitle track are always kept regardless of language filters. Use `--no-keep-first-audio` or `--no-keep-first-subtitle` to disable.
+
+### Parallel Batch Processing
+
+Convert multiple files in parallel for faster processing:
+
+```bash
+# Use all available CPU cores minus one
+de-dolby convert *.mkv --workers auto
+
+# Use specific number of workers
+de-dolby convert *.mkv --workers 4
+
+# Continue on errors (process all files even if some fail)
+de-dolby convert *.mkv --workers auto --skip-errors
+```
+
+When using multiple workers, a progress dashboard displays active conversions and completion status.
+
+### Resume Interrupted Conversions
+
+If a conversion is interrupted, resume from where it left off:
+
+```bash
+# Resume previous conversion
+de-dolby convert movie.mkv --resume
+
+# Clean up old state files
+de-dolby clean-state
+
+# Remove all state files (not just old ones)
+de-dolby clean-state --all
+```
+
+State files are automatically created in the temp directory and track conversion progress. They expire after 7 days.
+
+### Output Validation
+
+After conversion, de-dolby automatically validates the output file:
+
+```bash
+# Skip validation for faster batch processing
+de-dolby convert movie.mkv --no-validate
+```
+
+**Validation checks:**
+- File exists and is readable
+- Video stream present
+- HDR10 metadata (SMPTE 2084 transfer, BT.2020 primaries)
+- Mastering display metadata
+- Content light level (MaxCLL/MaxFALL)
+- Size ratio compared to input (warnings for significant differences)
+
+### Watch Mode
+
+Monitor a directory and automatically convert new Dolby Vision files:
+
+```bash
+# Watch current directory
+de-dolby watch .
+
+# Watch with custom output directory
+de-dolby watch /mnt/media --output-dir /mnt/converted
+
+# Watch recursively (subdirectories too)
+de-dolby watch /mnt/media --recursive
+
+# Customize check interval (default: 5 seconds)
+de-dolby watch /mnt/media --interval 10
+
+# Move original to subdirectory after conversion
+de-dolby watch /mnt/media --move-original
+
+# Reprocess files already converted
+de-dolby watch /mnt/media --reprocess
+```
+
+Watch mode waits for files to stabilize (finish copying) before processing and maintains state to avoid reprocessing.
 
 ---
 
@@ -235,6 +390,39 @@ ffmpeg -version && dovi_tool --version && mkvmerge --version && de-dolby --versi
 
 </details>
 
+### Docker
+
+Use the provided Docker image for a containerized environment:
+
+```bash
+# Build the image
+docker build -t de-dolby .
+
+# Run a conversion
+docker run --rm -v $(pwd)/videos:/videos de-dolby convert /videos/movie.mkv
+
+# Using docker-compose
+docker-compose run --rm de-dolby convert /videos/movie.mkv
+```
+
+**docker-compose profiles:**
+
+| Profile | Use Case | Command |
+|:--------|:---------|:--------|
+| (default) | Interactive/single file | `docker-compose run --rm de-dolby ...` |
+| `batch` | Batch conversion | `docker-compose --profile batch run de-dolby-batch` |
+| `gpu` | GPU-accelerated (VAAPI) | `docker-compose --profile gpu run de-dolby-gpu` |
+| `dev` | Development shell | `docker-compose --profile dev run de-dolby-dev` |
+
+**GPU passthrough (AMD/Intel via VAAPI):**
+
+```bash
+docker run --rm --device /dev/dri:/dev/dri \
+  --group-add video --group-add render \
+  -v $(pwd)/videos:/videos \
+  de-dolby convert /videos/movie.mkv --encoder hevc_vaapi
+```
+
 ---
 
 ## All Options
@@ -255,9 +443,45 @@ de-dolby convert <file> [<file> ...] [options]
   --dry-run                 Show steps without executing
   -v, --verbose             Show ffmpeg commands
   --force                   Overwrite existing output file
+  --no-validate             Skip output validation
+  --resume                  Resume from interrupted conversion
+  --workers N               Parallel workers for batch: N or 'auto'
+  --skip-errors             Continue processing other files if one fails
+  --audio-lang LANGS        Audio languages to keep (e.g., 'eng,jpn')
+  --subtitle-lang LANGS     Subtitle languages to keep (e.g., 'eng')
+  --no-audio                Strip all audio tracks
+  --no-subtitles            Strip all subtitle tracks
+  --no-keep-first-audio     Don't force keeping first audio track
+  --no-keep-first-subtitle  Don't force keeping first subtitle track
   --ffmpeg PATH             Path to ffmpeg binary
   --dovi-tool PATH          Path to dovi_tool binary
   --mkvmerge PATH           Path to mkvmerge binary
+
+de-dolby config [options]
+  --init                    Create an example config file
+  --show                    Show current config file path and contents
+
+de-dolby clean-state [options]
+  --all                     Remove all state files (not just old ones)
+  --temp-dir PATH           Directory where state files are stored
+
+de-dolby info <file> [<file> ...] [options]
+  --json                    Output in JSON format for scripting
+  --pretty                  Pretty-print JSON output (requires --json)
+  --ffmpeg PATH             Path to ffprobe binary
+
+de-dolby estimate <file> [options]
+  --encoder ENCODER         Video encoder to estimate with
+  --quality PRESET          Quality preset for estimation
+
+de-dolby watch <path> [options]
+  --output-dir DIR          Directory for converted files
+  --recursive               Watch subdirectories too
+  --interval N              Check interval in seconds (default: 5)
+  --delay N                 Wait N seconds after file appears (default: 10)
+  --pattern PATTERN         File pattern to watch (default: *.mkv)
+  --move-original           Move original to subdirectory after conversion
+  --reprocess               Reprocess files already in state
 ```
 
 ---
@@ -271,6 +495,9 @@ de-dolby convert <file> [<file> ...] [options]
 | **"No Dolby Vision metadata detected"** | File isn't DV. Run `de-dolby info` to verify |
 | **Large temp files** | 4K intermediates can be 50+ GB. Use `--temp-dir /path/with/space` |
 | **VAAPI permission denied** | Add user to render/video group: `sudo usermod -aG render,video $USER` |
+| **Conversion interrupted** | Use `--resume` to continue from where it left off |
+| **Out of disk space during batch** | Use `--workers 1` for sequential processing or set `--temp-dir` to a larger drive |
+| **Wrong audio tracks in output** | Use `--audio-lang` to filter and `--keep-first-audio` to ensure primary track |
 
 ---
 

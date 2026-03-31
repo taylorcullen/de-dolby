@@ -1,23 +1,48 @@
 """Neofetch-style display banner for file info and conversion status."""
 
-import os
 import sys
 from pathlib import Path
+from typing import TextIO
 
 from de_dolby import __version__
 from de_dolby.probe import FileInfo
 from de_dolby.utils import Colors as _C
-
+from de_dolby.utils import format_bytes as _format_bytes
+from de_dolby.utils import format_duration as _format_duration
 
 # Logo: DV ═══▶ HDR10
 # Each line is a list of (color, text) segments for per-character coloring.
 _LOGO_SEGMENTS: list[list[tuple[str, str]]] = [
-    [("M", "██████╗ ██╗   ██╗"), ("W", " ██████╗ "), ("G", "██╗  ██╗██████╗ ██████╗  ██╗ ██████╗ ")],
-    [("M", "██╔══██╗██║   ██║"), ("W", " ╚════██╗"), ("G", "██║  ██║██╔══██╗██╔══██╗███║██╔═████╗")],
-    [("M", "██║  ██║██║   ██║"), ("W", "  █████╔╝"), ("G", "███████║██║  ██║██████╔╝╚██║██║██╔██║")],
-    [("M", "██║  ██║╚██╗ ██╔╝"), ("W", " ██╔═══╝ "), ("G", "██╔══██║██║  ██║██╔══██╗ ██║████╔╝██║")],
-    [("M", "██████╔╝ ╚████╔╝ "), ("W", " ███████╗"), ("G", "██║  ██║██████╔╝██║  ██║ ██║╚██████╔╝")],
-    [("M", "╚═════╝   ╚═══╝  "), ("W", " ╚══════╝"), ("G", "╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝ ╚═╝ ╚═════╝ ")],
+    [
+        ("M", "██████╗ ██╗   ██╗"),
+        ("W", " ██████╗ "),
+        ("G", "██╗  ██╗██████╗ ██████╗  ██╗ ██████╗ "),
+    ],
+    [
+        ("M", "██╔══██╗██║   ██║"),
+        ("W", " ╚════██╗"),
+        ("G", "██║  ██║██╔══██╗██╔══██╗███║██╔═████╗"),
+    ],
+    [
+        ("M", "██║  ██║██║   ██║"),
+        ("W", "  █████╔╝"),
+        ("G", "███████║██║  ██║██████╔╝╚██║██║██╔██║"),
+    ],
+    [
+        ("M", "██║  ██║╚██╗ ██╔╝"),
+        ("W", " ██╔═══╝ "),
+        ("G", "██╔══██║██║  ██║██╔══██╗ ██║████╔╝██║"),
+    ],
+    [
+        ("M", "██████╔╝ ╚████╔╝ "),
+        ("W", " ███████╗"),
+        ("G", "██║  ██║██████╔╝██║  ██║ ██║╚██████╔╝"),
+    ],
+    [
+        ("M", "╚═════╝   ╚═══╝  "),
+        ("W", " ╚══════╝"),
+        ("G", "╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝ ╚═╝ ╚═════╝ "),
+    ],
 ]
 
 # Plain-text width of each logo line (all must be equal)
@@ -30,9 +55,6 @@ def _render_logo_line(segments: list[tuple[str, str]]) -> tuple[str, str]:
     plain = "".join(text for _, text in segments)
     colored = "".join(f"{color_map.get(c, '')}{text}{_C.RESET}" for c, text in segments)
     return plain, colored
-
-
-from de_dolby.utils import format_bytes as _format_bytes, format_duration as _format_duration
 
 
 def _file_size(path: str) -> str:
@@ -80,7 +102,7 @@ def _stream_summary(streams: list, max_width: int = 42) -> str:
         # Build incrementally to fit within max_width
         prefix = f"{codec}: "
         remaining = max_width - len(prefix)
-        shown = []
+        shown: list[str] = []
         for lang in langs:
             needed = len(", ".join(shown + [lang])) if shown else len(lang)
             overflow_suffix = f" +{len(langs) - len(shown)} more"
@@ -112,13 +134,17 @@ def _stream_summary(streams: list, max_width: int = 42) -> str:
 def _visible_len(s: str) -> int:
     """Return the visible length of a string, ignoring ANSI escape codes."""
     import re
+
     return len(re.sub(r"\033\[[0-9;]*m", "", s))
 
 
-def _build_info_rows(info: FileInfo, output_path: str | None = None,
-                     encoder_name: str | None = None,
-                     mode_str: str | None = None,
-                     sample_seconds: int | None = None) -> list[tuple[str, str]]:
+def _build_info_rows(
+    info: FileInfo,
+    output_path: str | None = None,
+    encoder_name: str | None = None,
+    mode_str: str | None = None,
+    sample_seconds: int | None = None,
+) -> list[tuple[str, str]]:
     """Build list of (label, value) rows for the banner."""
     rows: list[tuple[str, str]] = []
     rows.append(("File", Path(info.path).name))
@@ -141,6 +167,7 @@ def _build_info_rows(info: FileInfo, output_path: str | None = None,
 
     if encoder_name:
         from de_dolby.codecs import ENCODERS
+
         encoder = ENCODERS.get(encoder_name)
         encoder_label = encoder.display_name if encoder else encoder_name
         rows.append(("Encoder", encoder_label))
@@ -157,11 +184,14 @@ def _build_info_rows(info: FileInfo, output_path: str | None = None,
     return rows
 
 
-def display_banner(info: FileInfo, output_path: str | None = None,
-                   encoder_name: str | None = None,
-                   mode_str: str | None = None,
-                   sample_seconds: int | None = None,
-                   file: object = None) -> None:
+def display_banner(
+    info: FileInfo,
+    output_path: str | None = None,
+    encoder_name: str | None = None,
+    mode_str: str | None = None,
+    sample_seconds: int | None = None,
+    file: TextIO | None = None,
+) -> None:
     """Print a neofetch-style banner with file info.
 
     Args:
@@ -232,7 +262,7 @@ def display_banner(info: FileInfo, output_path: str | None = None,
     lines.append(hline("├", "─", "┤"))
 
     # Info rows
-    for (label, value), plain in zip(rows, plain_rows):
+    for (label, value), plain in zip(rows, plain_rows, strict=False):
         colored = f"  {_C.BRIGHT_CYAN}{_C.BOLD}{label + ':':<{label_width + 1}}{_C.RESET}  {value}"
         lines.append(box_line_plain(plain, len(plain), colored))
 

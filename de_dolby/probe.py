@@ -25,6 +25,47 @@ class StreamInfo:
     frame_rate: str | None = None
     bitrate: int | None = None
 
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for JSON output."""
+        result: dict = {
+            "index": self.index,
+            "codec": self.codec_name,
+        }
+        if self.codec_type == "video":
+            if self.width is not None:
+                result["width"] = self.width
+            if self.height is not None:
+                result["height"] = self.height
+            if self.pix_fmt is not None:
+                result["pix_fmt"] = self.pix_fmt
+            if self.bit_depth is not None:
+                result["bit_depth"] = self.bit_depth
+            if self.color_transfer is not None:
+                result["color_transfer"] = self.color_transfer
+            if self.color_primaries is not None:
+                result["color_primaries"] = self.color_primaries
+            if self.color_space is not None:
+                result["color_space"] = self.color_space
+            if self.frame_rate is not None:
+                result["frame_rate"] = self.frame_rate
+            if self.bitrate is not None:
+                result["bitrate_kbps"] = self.bitrate // 1000
+        elif self.codec_type == "audio":
+            if self.language is not None:
+                result["language"] = self.language
+            if self.title is not None:
+                result["title"] = self.title
+            result["default"] = self.default
+            if self.bitrate is not None:
+                result["bitrate_kbps"] = self.bitrate // 1000
+        elif self.codec_type == "subtitle":
+            if self.language is not None:
+                result["language"] = self.language
+            if self.title is not None:
+                result["title"] = self.title
+            result["default"] = self.default
+        return result
+
 
 @dataclass
 class FileInfo:
@@ -40,17 +81,76 @@ class FileInfo:
     audio_streams: list[StreamInfo] = field(default_factory=list)
     subtitle_streams: list[StreamInfo] = field(default_factory=list)
 
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for JSON output."""
+        from pathlib import Path
+
+        result: dict = {"file": self.path}
+
+        if self.duration is not None:
+            result["duration_seconds"] = round(self.duration, 1)
+            # Format as H:MM:SS
+            total_secs = int(self.duration)
+            hours = total_secs // 3600
+            mins = (total_secs % 3600) // 60
+            secs = total_secs % 60
+            result["duration_formatted"] = f"{hours}:{mins:02d}:{secs:02d}"
+
+        if self.overall_bitrate is not None:
+            result["bitrate_kbps"] = self.overall_bitrate // 1000
+
+        # File size
+        try:
+            size = Path(self.path).stat().st_size
+            result["size_bytes"] = size
+        except OSError:
+            pass
+
+        # Dolby Vision info
+        if self.dv_profile is not None:
+            result["dolby_vision"] = {
+                "profile": self.dv_profile,
+            }
+            if self.dv_bl_signal_compatibility_id is not None:
+                result["dolby_vision"]["bl_signal_compatibility_id"] = (
+                    self.dv_bl_signal_compatibility_id
+                )
+
+        # HDR10 info
+        hdr10_info: dict = {"detected": self.has_hdr10}
+        if self.master_display is not None:
+            hdr10_info["master_display"] = self.master_display
+        if self.content_light_level is not None:
+            parts = self.content_light_level.split(",")
+            if len(parts) == 2:
+                hdr10_info["max_cll"] = int(parts[0])
+                hdr10_info["max_fall"] = int(parts[1])
+        result["hdr10"] = hdr10_info
+
+        # Streams
+        result["video"] = [s.to_dict() for s in self.video_streams]
+        result["audio"] = [s.to_dict() for s in self.audio_streams]
+        result["subtitles"] = [s.to_dict() for s in self.subtitle_streams]
+
+        return result
+
 
 def probe(path: str) -> FileInfo:
     """Analyze an MKV file and return structured info about its streams and DV profile."""
-    r = run_ffprobe([
-        "-v", "quiet",
-        "-print_format", "json",
-        "-show_format",
-        "-show_streams",
-        "-show_frames", "-read_intervals", "%+#1",  # read 1 frame for side data
-        path,
-    ])
+    r = run_ffprobe(
+        [
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            "-show_frames",
+            "-read_intervals",
+            "%+#1",  # read 1 frame for side data
+            path,
+        ]
+    )
     data = json.loads(r.stdout.decode())
 
     info = FileInfo(path=path)
@@ -122,21 +222,22 @@ def _extract_side_data(sd_list: list[dict], info: FileInfo, overwrite: bool = Tr
             if overwrite or info.master_display is None:
                 info.master_display = _parse_ffprobe_master_display(sd)
 
-        elif sd_type == "Content light level metadata":
-            if overwrite or info.content_light_level is None:
-                max_cll = sd.get("max_content", 0)
-                max_fall = sd.get("max_average", 0)
-                if max_cll or max_fall:
-                    info.content_light_level = f"{max_cll},{max_fall}"
+        elif sd_type == "Content light level metadata" and (
+            overwrite or info.content_light_level is None
+        ):
+            max_cll = sd.get("max_content", 0)
+            max_fall = sd.get("max_average", 0)
+            if max_cll or max_fall:
+                info.content_light_level = f"{max_cll},{max_fall}"
 
 
 def _parse_rational(val: str) -> float:
     """Parse a rational string like '34000/50000' to a float (0.68)."""
-    s = str(val)
-    if "/" in s:
-        num, den = s.split("/", 1)
+    val_str = str(val)
+    if "/" in val_str:
+        num, den = val_str.split("/", 1)
         return int(num) / int(den) if int(den) != 0 else 0.0
-    return float(s)
+    return float(val_str)
 
 
 def _parse_ffprobe_master_display(sd: dict) -> str | None:
@@ -176,17 +277,25 @@ def format_info(info: FileInfo) -> str:
     if info.overall_bitrate:
         lines.append(f"Bitrate: {info.overall_bitrate // 1000} kbps")
 
-    lines.append(f"Dolby Vision: Profile {info.dv_profile}" if info.dv_profile else "Dolby Vision: not detected")
+    lines.append(
+        f"Dolby Vision: Profile {info.dv_profile}"
+        if info.dv_profile
+        else "Dolby Vision: not detected"
+    )
     if info.dv_bl_signal_compatibility_id is not None:
         lines.append(f"  BL compatibility ID: {info.dv_bl_signal_compatibility_id}")
     lines.append(f"HDR10 base layer: {'yes' if info.has_hdr10 else 'no'}")
 
     for vs in info.video_streams:
-        lines.append(f"\nVideo #{vs.index}: {vs.codec_name} {vs.width}x{vs.height} "
-                      f"{vs.pix_fmt or ''} {vs.frame_rate or ''}")
+        lines.append(
+            f"\nVideo #{vs.index}: {vs.codec_name} {vs.width}x{vs.height} "
+            f"{vs.pix_fmt or ''} {vs.frame_rate or ''}"
+        )
         if vs.color_transfer:
-            lines.append(f"  Transfer: {vs.color_transfer}  Primaries: {vs.color_primaries}  "
-                          f"Space: {vs.color_space}")
+            lines.append(
+                f"  Transfer: {vs.color_transfer}  Primaries: {vs.color_primaries}  "
+                f"Space: {vs.color_space}"
+            )
         if vs.bitrate:
             lines.append(f"  Bitrate: {vs.bitrate // 1000} kbps")
 
@@ -196,9 +305,9 @@ def format_info(info: FileInfo) -> str:
         br = f" {a.bitrate // 1000}kbps" if a.bitrate else ""
         lines.append(f"Audio #{a.index}: {a.codec_name} [{lang}]{title}{br}")
 
-    for s in info.subtitle_streams:
-        lang = s.language or "und"
-        title = f" ({s.title})" if s.title else ""
-        lines.append(f"Subtitle #{s.index}: {s.codec_name} [{lang}]{title}")
+    for sub in info.subtitle_streams:
+        lang = sub.language or "und"
+        title = f" ({sub.title})" if sub.title else ""
+        lines.append(f"Subtitle #{sub.index}: {sub.codec_name} [{lang}]{title}")
 
     return "\n".join(lines)

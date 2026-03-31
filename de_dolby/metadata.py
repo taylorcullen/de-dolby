@@ -5,8 +5,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from de_dolby.tools import run_dovi_tool
 from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX_FALL
+from de_dolby.tools import run_dovi_tool
 
 
 @dataclass
@@ -27,24 +27,31 @@ class HDR10Metadata:
     def mkvmerge_args(self, track_id: int = 0) -> list[str]:
         """Build mkvmerge flags for HDR10 metadata on a video track."""
         args = [
-            "--colour-matrix-coefficients", f"{track_id}:9",     # bt2020nc
-            "--colour-transfer-characteristics", f"{track_id}:16",  # smpte2084
-            "--colour-primaries", f"{track_id}:9",                # bt2020
-            "--colour-range", f"{track_id}:1",                    # limited
-            "--max-content-light", f"{track_id}:{self.max_cll}",
-            "--max-frame-light", f"{track_id}:{self.max_fall}",
+            "--colour-matrix-coefficients",
+            f"{track_id}:9",  # bt2020nc
+            "--colour-transfer-characteristics",
+            f"{track_id}:16",  # smpte2084
+            "--colour-primaries",
+            f"{track_id}:9",  # bt2020
+            "--colour-range",
+            f"{track_id}:1",  # limited
+            "--max-content-light",
+            f"{track_id}:{self.max_cll}",
+            "--max-frame-light",
+            f"{track_id}:{self.max_fall}",
         ]
         # Parse master display to extract chromaticity and luminance
         md = self._parse_master_display()
         if md:
             args += [
-                "--chromaticity-coordinates", f"{track_id}:"
-                f"{md['rx']},{md['ry']},"
-                f"{md['gx']},{md['gy']},"
-                f"{md['bx']},{md['by']}",
-                "--white-colour-coordinates", f"{track_id}:{md['wpx']},{md['wpy']}",
-                "--max-luminance", f"{track_id}:{md['lmax']}",
-                "--min-luminance", f"{track_id}:{md['lmin']}",
+                "--chromaticity-coordinates",
+                f"{track_id}:{md['rx']},{md['ry']},{md['gx']},{md['gy']},{md['bx']},{md['by']}",
+                "--white-colour-coordinates",
+                f"{track_id}:{md['wpx']},{md['wpy']}",
+                "--max-luminance",
+                f"{track_id}:{md['lmax']}",
+                "--min-luminance",
+                f"{track_id}:{md['lmin']}",
             ]
         return args
 
@@ -57,6 +64,7 @@ class HDR10Metadata:
         mkvmerge expects chromaticity in 0.0-1.0 float and luminance in cd/m².
         """
         import re
+
         m = re.match(
             r"G\((\d+),(\d+)\)B\((\d+),(\d+)\)R\((\d+),(\d+)\)"
             r"WP\((\d+),(\d+)\)L\((\d+),(\d+)\)",
@@ -66,11 +74,16 @@ class HDR10Metadata:
             return None
         vals = [int(x) for x in m.groups()]
         return {
-            "gx": vals[0] / 50000, "gy": vals[1] / 50000,
-            "bx": vals[2] / 50000, "by": vals[3] / 50000,
-            "rx": vals[4] / 50000, "ry": vals[5] / 50000,
-            "wpx": vals[6] / 50000, "wpy": vals[7] / 50000,
-            "lmax": vals[8] / 10000, "lmin": vals[9] / 10000,
+            "gx": vals[0] / 50000,
+            "gy": vals[1] / 50000,
+            "bx": vals[2] / 50000,
+            "by": vals[3] / 50000,
+            "rx": vals[4] / 50000,
+            "ry": vals[5] / 50000,
+            "wpx": vals[6] / 50000,
+            "wpy": vals[7] / 50000,
+            "lmax": vals[8] / 10000,
+            "lmin": vals[9] / 10000,
         }
 
 
@@ -153,7 +166,7 @@ def _find_l6(rpu: dict) -> dict | None:
                     return obj
                 # Nested further
                 if "level6" in obj:
-                    return obj["level6"]
+                    return obj["level6"]  # type: ignore[no-any-return]
                 for sub in obj.values():
                     if isinstance(sub, dict) and "max_content_light_level" in sub:
                         return sub

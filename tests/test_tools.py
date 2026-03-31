@@ -1,9 +1,7 @@
 """Tests for de_dolby.tools — verbose mode, timeouts, logging, and configuration."""
 
 import subprocess
-import tempfile
-import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -75,7 +73,10 @@ class TestTimeout:
         _, kwargs = mock_run.call_args
         assert kwargs["timeout"] is None
 
-    @patch("de_dolby.tools.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="test", timeout=60))
+    @patch(
+        "de_dolby.tools.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="test", timeout=60),
+    )
     def test_timeout_raises_runtime_error(self, mock_run):
         tools._timeout_seconds = 60
         with pytest.raises(RuntimeError, match="timed out"):
@@ -136,7 +137,8 @@ class TestLogFile:
         tools.configure_log_file(log_path)
         tools._log("test message")
         tools.configure_log_file(None)  # close the file
-        content = open(log_path).read()
+        with open(log_path) as f:
+            content = f.read()
         assert "test message" in content
 
     @patch("de_dolby.tools.subprocess.run")
@@ -146,7 +148,8 @@ class TestLogFile:
         tools.configure_log_file(log_path)
         tools._run(["echo", "hello"])
         tools.configure_log_file(None)
-        content = open(log_path).read()
+        with open(log_path) as f:
+            content = f.read()
         assert "$ echo hello" in content
         assert "exit=0" in content
 

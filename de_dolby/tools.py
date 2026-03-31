@@ -26,8 +26,9 @@ def set_verbose(enabled: bool) -> None:
     _verbose = enabled
 
 
-def configure(*, ffmpeg: str | None = None, dovi_tool: str | None = None,
-              mkvmerge: str | None = None) -> None:
+def configure(
+    *, ffmpeg: str | None = None, dovi_tool: str | None = None, mkvmerge: str | None = None
+) -> None:
     if ffmpeg:
         _paths.ffmpeg = ffmpeg
         # Derive ffprobe from same directory
@@ -52,11 +53,12 @@ def configure_timeout(minutes: int | None) -> None:
 def configure_log_file(path: str | None) -> None:
     """Open a log file for writing all subprocess commands and output."""
     import atexit
+
     global _log_file
     if _log_file:
         _log_file.close()
     if path:
-        _log_file = open(path, "w")
+        _log_file = open(path, "w")  # noqa: SIM115 - file must stay open for logging
         atexit.register(lambda: _log_file.close() if _log_file else None)
     else:
         _log_file = None
@@ -69,8 +71,14 @@ def _log(msg: str) -> None:
         _log_file.flush()
 
 
-def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
-         stdin_data: bytes | None = None, pipe_stdin: bool = False) -> subprocess.CompletedProcess:
+def _run(
+    cmd: list[str],
+    *,
+    capture: bool = True,
+    check: bool = True,
+    stdin_data: bytes | None = None,
+    pipe_stdin: bool = False,
+) -> subprocess.CompletedProcess:
     if _verbose:
         print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
     _log(f"$ {' '.join(cmd)}")
@@ -79,14 +87,19 @@ def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
     stderr = subprocess.PIPE
     try:
         result = subprocess.run(
-            cmd, stdin=stdin, stdout=stdout, stderr=stderr,
-            input=stdin_data, check=False, timeout=_timeout_seconds,
+            cmd,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            input=stdin_data,
+            check=False,
+            timeout=_timeout_seconds,
         )
     except subprocess.TimeoutExpired:
         _log(f"TIMEOUT after {_timeout_seconds}s")
         raise RuntimeError(
             f"Command timed out after {_timeout_seconds}s: {' '.join(cmd)}"
-        )
+        ) from None
     _log(f"exit={result.returncode}")
     if result.stderr:
         stderr_text = result.stderr.decode(errors="replace").strip()
@@ -96,17 +109,19 @@ def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
         err = result.stderr.decode(errors="replace") if result.stderr else ""
         out = result.stdout.decode(errors="replace") if result.stdout else ""
         detail = err or out
-        raise RuntimeError(
-            f"Command failed (exit {result.returncode}): {' '.join(cmd)}\n{detail}"
-        )
+        raise RuntimeError(f"Command failed (exit {result.returncode}): {' '.join(cmd)}\n{detail}")
     return result
 
 
 def check_tools() -> dict[str, bool]:
     """Verify which required tools are available. Returns {name: available}."""
     status = {}
-    for name, path in [("ffmpeg", _paths.ffmpeg), ("ffprobe", _paths.ffprobe),
-                        ("dovi_tool", _paths.dovi_tool), ("mkvmerge", _paths.mkvmerge)]:
+    for name, path in [
+        ("ffmpeg", _paths.ffmpeg),
+        ("ffprobe", _paths.ffprobe),
+        ("dovi_tool", _paths.dovi_tool),
+        ("mkvmerge", _paths.mkvmerge),
+    ]:
         status[name] = shutil.which(path) is not None
     return status
 
@@ -128,6 +143,7 @@ def check_encoder_available(name: str) -> bool:
         # Each line is like: " V..... hevc_amf         AMD AMF HEVC encoder"
         # Match the encoder name as a whitespace-delimited token
         import re
+
         available = bool(re.search(rf"\b{re.escape(name)}\b", output))
     except FileNotFoundError:
         available = False

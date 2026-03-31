@@ -9,12 +9,11 @@ from dataclasses import dataclass
 
 from de_dolby.utils import Colors as _C
 
-
 # Progress bar characters
-_BAR_FILL = "\u2588"   # █
+_BAR_FILL = "\u2588"  # █
 _BAR_EMPTY = "\u2591"  # ░
 _BAR_WIDTH = 30
-_CHECK = "\u2713"      # ✓
+_CHECK = "\u2713"  # ✓
 
 
 @dataclass
@@ -90,10 +89,13 @@ class ProgressReporter:
             sys.stderr.flush()
             self._start_pulse(desc)
 
-    def update_encoding_progress(self, percent: float | None = None,
-                                  fps: float | None = None,
-                                  speed: str | None = None,
-                                  time_str: str | None = None) -> None:
+    def update_encoding_progress(
+        self,
+        percent: float | None = None,
+        fps: float | None = None,
+        speed: str | None = None,
+        time_str: str | None = None,
+    ) -> None:
         """Update encoding progress with a progress bar on the current line."""
         self._stop_pulse()
         step = self.steps[self.current_step] if self.current_step < len(self.steps) else None
@@ -146,7 +148,9 @@ class ProgressReporter:
     def finish(self, message: str = "Conversion complete!") -> None:
         self._stop_pulse()
         self._clear_line()
-        sys.stderr.write(f"\n  {_C.BRIGHT_GREEN}{_CHECK}{_C.RESET} {_C.BOLD}{message}{_C.RESET}\n\n")
+        sys.stderr.write(
+            f"\n  {_C.BRIGHT_GREEN}{_CHECK}{_C.RESET} {_C.BOLD}{message}{_C.RESET}\n\n"
+        )
         sys.stderr.flush()
 
     def error(self, message: str) -> None:
@@ -240,9 +244,9 @@ def parse_ffmpeg_progress(line: str, duration: float | None) -> dict | None:
     return info if info else None
 
 
-def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
-                              reporter: ProgressReporter,
-                              verbose: bool = False) -> subprocess.CompletedProcess:
+def run_ffmpeg_with_progress(
+    cmd: list[str], duration: float | None, reporter: ProgressReporter, verbose: bool = False
+) -> subprocess.CompletedProcess:
     """Run ffmpeg command while parsing stderr for progress updates."""
     if verbose:
         print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
@@ -288,7 +292,7 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
                 pos = min(cr, lf)
 
             line = buf[:pos].decode(errors="replace").strip()
-            buf = buf[pos + 1:]
+            buf = buf[pos + 1 :]
 
             if line:
                 progress = parse_ffmpeg_progress(line, duration)
@@ -307,7 +311,8 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
         raise RuntimeError(f"ffmpeg failed (exit {process.returncode}):\n{err}")
 
     return subprocess.CompletedProcess(
-        args=cmd, returncode=process.returncode,
+        args=cmd,
+        returncode=process.returncode,
         stdout=process.stdout.read() if process.stdout else b"",
         stderr=stderr_data,
     )

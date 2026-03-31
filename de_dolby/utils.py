@@ -1,8 +1,12 @@
 """Shared utilities: ANSI colors, formatting helpers."""
 
+import re
+from pathlib import Path
+
 
 class Colors:
     """ANSI escape codes for terminal output."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -37,3 +41,25 @@ def format_duration(seconds: float | None) -> str:
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}"
+
+
+def derive_output_name(input_path: str) -> str:
+    """Derive an HDR10 output filename from the input path.
+
+    If the filename contains '.DV.' (case-insensitive), replace it with '.HDR10.'.
+    Otherwise, insert '.HDR10' before the file extension.
+
+    Examples:
+        '2x03 - Secrets.DV.mkv'  -> '2x03 - Secrets.HDR10.mkv'
+        '2x03 - Secrets.mkv'     -> '2x03 - Secrets.HDR10.mkv'
+    """
+    p = Path(input_path)
+    stem_with_ext = p.name
+
+    # Try replacing .DV. (case-insensitive) with .HDR10.
+    replaced = re.sub(r"\.DV\.", ".HDR10.", stem_with_ext, count=1, flags=re.IGNORECASE)
+    if replaced != stem_with_ext:
+        return str(p.with_name(replaced))
+
+    # No .DV. found — insert .HDR10 before the extension
+    return str(p.with_suffix("")) + ".HDR10" + p.suffix

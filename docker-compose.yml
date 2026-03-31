@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  de-dolby:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: de-dolby:latest
+    container_name: de-dolby
+    volumes:
+      # Mount your video directory
+      - ./videos:/videos
+      # Optional: Mount a directory for outputs
+      - ./output:/output
+      # Optional: Mount temp directory for large intermediates
+      - /tmp/de-dolby:/tmp
+    working_dir: /videos
+    # Default command shows help
+    command: --help
+    # For interactive use
+    stdin_open: true
+    tty: true
+
+  # Example service for batch conversion
+  de-dolby-batch:
+    extends:
+      service: de-dolby
+    profiles: ["batch"]
+    command: convert /videos/*.mkv --output /output/
+
+  # Example service with GPU support (AMD/Intel VAAPI)
+  de-dolby-gpu:
+    extends:
+      service: de-dolby
+    profiles: ["gpu"]
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    environment:
+      - DEFAULT_ENCODER=hevc_vaapi
+    command: convert /videos/input.mkv --encoder hevc_vaapi -o /output/
+
+  # Development service with shell access
+  de-dolby-dev:
+    extends:
+      service: de-dolby
+    profiles: ["dev"]
+    entrypoint: /bin/bash
+    command: -c "echo 'Tools available:' && which ffmpeg dovi_tool mkvmerge && echo && echo 'de-dolby version:' && de-dolby --version && bash"
+    volumes:
+      - .:/app:ro
+      - ./videos:/videos

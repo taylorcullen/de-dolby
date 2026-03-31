@@ -411,6 +411,9 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/videos:/videos" de-dolby convert /
 docker-compose run --rm de-dolby convert /videos/movie.mkv
 ```
 
+> **Note:** Always use `/videos/` (container path) in the command, not `videos/` (host path).
+> The `-v` mount maps your host directory to `/videos` inside the container.
+
 **docker-compose profiles:**
 
 | Profile | Use Case | Command |

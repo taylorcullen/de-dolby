@@ -1,5 +1,7 @@
 """Probe input files for Dolby Vision profile, HDR metadata, and stream info."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 
@@ -14,6 +16,12 @@ class StreamInfo:
     language: str | None = None
     title: str | None = None
     default: bool = False
+    forced: bool = False
+    tags: dict[str, str] = field(default_factory=dict)
+    disposition: dict[str, bool] = field(default_factory=dict)
+    # Attachment-specific
+    filename: str | None = None
+    mimetype: str | None = None
     # Video-specific
     width: int | None = None
     height: int | None = None
@@ -39,6 +47,19 @@ class FileInfo:
     video_streams: list[StreamInfo] = field(default_factory=list)
     audio_streams: list[StreamInfo] = field(default_factory=list)
     subtitle_streams: list[StreamInfo] = field(default_factory=list)
+    attachment_streams: list[StreamInfo] = field(default_factory=list)
+    other_streams: list[StreamInfo] = field(default_factory=list)
+    chapters: list[ChapterInfo] = field(default_factory=list)
+    tags: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ChapterInfo:
+    id: int
+    start_time: float | None = None
+    end_time: float | None = None
+    title: str | None = None
+    tags: dict[str, str] = field(default_factory=dict)
 
 
 def probe(path: str) -> FileInfo:
@@ -48,6 +69,7 @@ def probe(path: str) -> FileInfo:
         "-print_format", "json",
         "-show_format",
         "-show_streams",
+        "-show_chapters",
         "-show_frames", "-read_intervals", "%+#1",  # read 1 frame for side data
         path,
     ])
@@ -59,18 +81,30 @@ def probe(path: str) -> FileInfo:
     fmt = data.get("format", {})
     info.duration = float(fmt["duration"]) if "duration" in fmt else None
     info.overall_bitrate = int(fmt["bit_rate"]) if "bit_rate" in fmt else None
+    info.tags = {
+        str(key): str(value) for key, value in fmt.get("tags", {}).items()
+    }
 
     # Parse streams
     for s in data.get("streams", []):
         codec_type = s.get("codec_type", "")
         tags = s.get("tags", {})
+        disposition = {
+            str(key): bool(value)
+            for key, value in s.get("disposition", {}).items()
+        }
         si = StreamInfo(
             index=s.get("index", 0),
             codec_type=codec_type,
             codec_name=s.get("codec_name", ""),
             language=tags.get("language"),
             title=tags.get("title"),
-            default=s.get("disposition", {}).get("default", 0) == 1,
+            default=disposition.get("default", False),
+            forced=disposition.get("forced", False),
+            tags={str(key): str(value) for key, value in tags.items()},
+            disposition=disposition,
+            filename=tags.get("filename"),
+            mimetype=tags.get("mimetype"),
         )
         if codec_type == "video":
             si.width = s.get("width")
@@ -96,6 +130,29 @@ def probe(path: str) -> FileInfo:
             info.audio_streams.append(si)
         elif codec_type == "subtitle":
             info.subtitle_streams.append(si)
+        elif codec_type == "attachment":
+            info.attachment_streams.append(si)
+        else:
+            info.other_streams.append(si)
+
+    for chapter in data.get("chapters", []):
+        tags = {
+            str(key): str(value)
+            for key, value in chapter.get("tags", {}).items()
+        }
+        info.chapters.append(ChapterInfo(
+            id=chapter.get("id", len(info.chapters)),
+            start_time=(
+                float(chapter["start_time"])
+                if "start_time" in chapter else None
+            ),
+            end_time=(
+                float(chapter["end_time"])
+                if "end_time" in chapter else None
+            ),
+            title=tags.get("title"),
+            tags=tags,
+        ))
 
     # Also check frames for side data (more reliable for some files)
     for frame in data.get("frames", []):

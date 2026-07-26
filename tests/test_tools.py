@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 import de_dolby.tools as tools
+from de_dolby.process import ProcessTimedOut
 
 
 class TestVerbose:
@@ -26,7 +27,7 @@ class TestVerbose:
         tools.set_verbose(False)
         assert tools._verbose is False
 
-    @patch("de_dolby.tools.subprocess.run")
+    @patch("de_dolby.tools.default_runner.run")
     def test_verbose_prints_command(self, mock_run, capsys):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
         tools.set_verbose(True)
@@ -34,7 +35,7 @@ class TestVerbose:
         captured = capsys.readouterr()
         assert "[cmd] echo hello" in captured.err
 
-    @patch("de_dolby.tools.subprocess.run")
+    @patch("de_dolby.tools.default_runner.run")
     def test_non_verbose_no_print(self, mock_run, capsys):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
         tools.set_verbose(False)
@@ -59,23 +60,24 @@ class TestTimeout:
         tools.configure_timeout(None)
         assert tools._timeout_seconds is None
 
-    @patch("de_dolby.tools.subprocess.run")
+    @patch("de_dolby.tools.default_runner.run")
     def test_timeout_passed_to_subprocess(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
         tools._timeout_seconds = 60
         tools._run(["echo", "test"])
-        _, kwargs = mock_run.call_args
-        assert kwargs["timeout"] == 60
+        assert mock_run.call_args.args[0].timeout_seconds == 60
 
-    @patch("de_dolby.tools.subprocess.run")
+    @patch("de_dolby.tools.default_runner.run")
     def test_no_timeout_by_default(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
         tools._timeout_seconds = None
         tools._run(["echo", "test"])
-        _, kwargs = mock_run.call_args
-        assert kwargs["timeout"] is None
+        assert mock_run.call_args.args[0].timeout_seconds is None
 
-    @patch("de_dolby.tools.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="test", timeout=60))
+    @patch(
+        "de_dolby.tools.default_runner.run",
+        side_effect=ProcessTimedOut(("test",), 60),
+    )
     def test_timeout_raises_runtime_error(self, mock_run):
         tools._timeout_seconds = 60
         with pytest.raises(RuntimeError, match="timed out"):
@@ -139,7 +141,7 @@ class TestLogFile:
         content = open(log_path).read()
         assert "test message" in content
 
-    @patch("de_dolby.tools.subprocess.run")
+    @patch("de_dolby.tools.default_runner.run")
     def test_run_logs_command_and_exit_code(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
         log_path = str(tmp_path / "test.log")

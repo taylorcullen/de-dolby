@@ -8,6 +8,11 @@ import time
 from dataclasses import dataclass
 
 from de_dolby.utils import Colors as _C
+from de_dolby.process import (
+    ProcessCancelled,
+    process_group_popen_kwargs,
+    terminate_process_tree,
+)
 
 
 # Progress bar characters
@@ -252,6 +257,7 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         universal_newlines=False,
+        **process_group_popen_kwargs(),
     )
 
     stderr_data = b""
@@ -260,7 +266,13 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
     # Read in larger chunks instead of byte-by-byte for better performance.
     # ffmpeg writes progress lines terminated by \r, so we split on both \r and \n.
     while True:
-        chunk = process.stderr.read(4096) if process.stderr else b""
+        try:
+            chunk = process.stderr.read(4096) if process.stderr else b""
+        except KeyboardInterrupt as exc:
+            terminate_process_tree(process)
+            raise ProcessCancelled(
+                f"Command cancelled: {' '.join(cmd)}", tuple(cmd)
+            ) from exc
         if not chunk:
             if buf:
                 line = buf.decode(errors="replace").strip()

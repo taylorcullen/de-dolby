@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "context": [
+    "AGENTS.md",
+    "ai/PRODUCT.md",
+    "ai/ARCHITECTURE.md",
+    "ai/DECISIONS.md",
+    "README.md",
+    "pyproject.toml"
+  ],
+  "backlog": "ai/backlog.json",
+  "scopes": {
+    "product": [
+      {
+        "name": "product tests",
+        "command": ["{python}", "-m", "pytest", "tests", "-q", "--basetemp=.pytest-tmp"]
+      }
+    ],
+    "harness": [
+      {
+        "name": "harness tests",
+        "command": ["{python}", "-m", "unittest", "discover", "-s", "harness_tests", "-v"]
+      },
+      {
+        "name": "compile harness",
+        "command": ["{python}", "-m", "compileall", "-q", "harness", "harness_tests"]
+      }
+    ]
+  }
+}

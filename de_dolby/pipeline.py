@@ -12,7 +12,10 @@ from de_dolby.codecs import Encoder, InputCodec, get_encoder, get_input_codec
 from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX_FALL
 from de_dolby.utils import format_bytes
 from de_dolby.display import display_banner
+from de_dolby.fidelity import build_source_remux_args
 from de_dolby.metadata import HDR10Metadata, extract_rpu, parse_rpu_metadata
+from de_dolby.output import OutputTransaction
+from de_dolby.plan import ConversionPlan, PipelineKind, create_conversion_plan
 from de_dolby.probe import FileInfo, probe
 from de_dolby.progress import (
     ProgressReporter, STEPS_LOSSLESS, STEPS_REENCODE,
@@ -21,6 +24,7 @@ from de_dolby.progress import (
 from de_dolby.tools import (
     check_encoder_available, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
+from de_dolby.validation import validate_staged_output
 
 
 @dataclass
@@ -34,6 +38,7 @@ class ConvertOptions:
     dry_run: bool = False
     verbose: bool = False
     force: bool = False
+    unsafe_skip_validation: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,8 @@ class PipelineContext:
     output_path: str
     options: ConvertOptions
     tmp_dir: str
+    final_output_path: str = ""
+    plan: ConversionPlan | None = None
     # Paths set during pipeline execution
     raw_path: str = ""
     rpu_path: str = ""
@@ -90,7 +97,8 @@ def _run_pipeline(steps: list[tuple[str, str, StepFn | None]],
             progress.complete_step()
 
         output_size = Path(ctx.output_path).stat().st_size if not ctx.options.dry_run else 0
-        progress.finish(f"Done! Output: {ctx.output_path} ({format_bytes(output_size)})")
+        shown_output = ctx.final_output_path or ctx.output_path
+        progress.finish(f"Done! Output: {shown_output} ({format_bytes(output_size)})")
 
     except BaseException:
         _cleanup_temp(ctx.tmp_dir)
@@ -168,11 +176,19 @@ def _step_encode(ctx: PipelineContext) -> None:
 
 
 def _step_remux_lossless(ctx: PipelineContext) -> None:
-    _remux(ctx.output_path, ctx.clean_path, ctx.meta, ctx.info, ctx.options, ctx.audio_subs_path)
+    assert ctx.plan is not None
+    _remux(
+        ctx.output_path, ctx.clean_path, ctx.meta, ctx.info, ctx.options,
+        ctx.audio_subs_path, ctx.plan,
+    )
 
 
 def _step_remux_encoded(ctx: PipelineContext) -> None:
-    _remux(ctx.output_path, ctx.encoded_path, ctx.meta, ctx.info, ctx.options, ctx.audio_subs_path)
+    assert ctx.plan is not None
+    _remux(
+        ctx.output_path, ctx.encoded_path, ctx.meta, ctx.info, ctx.options,
+        ctx.audio_subs_path, ctx.plan,
+    )
 
 
 def _step_cleanup(ctx: PipelineContext) -> None:
@@ -180,69 +196,108 @@ def _step_cleanup(ctx: PipelineContext) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Encoder resolution
-# ---------------------------------------------------------------------------
-
-def _resolve_encoder(options: ConvertOptions, input_codec: InputCodec) -> str:
-    if options.encoder != "auto":
-        return options.encoder
-    for name in input_codec.auto_encoder_priority():
-        if check_encoder_available(name):
-            return name
-    return input_codec.auto_encoder_priority()[-1]
-
-
-# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
 def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
-    """Main conversion entry point."""
+    """Plan and execute one conversion."""
     info = probe(input_path)
-
-    if not info.video_streams:
-        raise RuntimeError("No video streams found in input file")
-
-    codec_name = info.video_streams[0].codec_name
-    input_codec = get_input_codec(codec_name)
-
-    if info.dv_profile is None:
-        raise RuntimeError("No Dolby Vision metadata detected in input file")
+    plan = _plan_from_info(info, output_path, options)
 
     if not options.force and Path(output_path).exists():
         raise RuntimeError(f"Output file already exists: {output_path} (use --force to overwrite)")
 
-    encoder_name = _resolve_encoder(options, input_codec)
-    encoder = get_encoder(encoder_name)
-    use_lossless = (
-        input_codec.supports_lossless
-        and encoder_name == "copy"
-        and info.dv_profile in (7, 8, 10)
+    execute_conversion_plan(plan, info, options)
+
+
+def plan_conversion(
+    input_path: str, output_path: str, options: ConvertOptions
+) -> ConversionPlan:
+    """Probe an input and return its plan without creating conversion files."""
+    return _plan_from_info(probe(input_path), output_path, options)
+
+
+def _plan_from_info(
+    info: FileInfo, output_path: str, options: ConvertOptions
+) -> ConversionPlan:
+    """Add probed encoder availability to pure planning inputs."""
+    available: set[str] = set()
+    if info.video_streams:
+        codec = get_input_codec(info.video_streams[0].codec_name)
+        if options.encoder == "auto" and not (
+            info.dv_profile in (7, 8) and codec.supports_lossless
+        ):
+            available = {
+                name for name in codec.auto_encoder_priority()
+                if check_encoder_available(name)
+            }
+        elif options.encoder not in ("auto", "copy"):
+            if check_encoder_available(options.encoder):
+                available.add(options.encoder)
+    return create_conversion_plan(
+        info, output_path,
+        requested_encoder=options.encoder,
+        available_encoders=available,
+        sample_seconds=options.sample_seconds,
+        quality=options.quality,
+        crf=options.crf,
+        bitrate=options.bitrate,
+        temp_dir=options.temp_dir,
+        unsafe_skip_validation=options.unsafe_skip_validation,
     )
 
-    if not input_codec.supports_lossless and encoder_name == "copy":
-        encoder_name = _resolve_encoder(
-            ConvertOptions(encoder="auto", quality=options.quality), input_codec
-        )
-        encoder = get_encoder(encoder_name)
 
-    if use_lossless:
+def execute_conversion_plan(
+    plan: ConversionPlan, info: FileInfo, options: ConvertOptions
+) -> None:
+    """Execute decisions already captured by an immutable plan."""
+    input_codec = get_input_codec(plan.input_codec)
+    encoder = get_encoder(plan.encoder)
+    for warning in plan.warnings:
+        print(f"Warning: {warning}", file=sys.stderr)
+
+    if plan.pipeline is PipelineKind.LOSSLESS_RPU_STRIP:
         mode_str = "Lossless RPU strip (no re-encode)"
     else:
-        mode_str = f"Re-encode to {encoder.codec_family.upper()} (Profile {info.dv_profile})"
+        mode_str = f"Re-encode to {encoder.codec_family.upper()} (Profile {plan.profile})"
 
-    display_banner(info, output_path, encoder_name, mode_str,
+    display_banner(info, plan.output_path, plan.encoder, mode_str,
                    sample_seconds=options.sample_seconds)
     set_verbose(options.verbose)
 
-    if not options.dry_run:
-        _check_disk_space(info, options)
+    if options.dry_run:
+        print("  Planned steps: " + " -> ".join(plan.steps))
+        return
 
-    if use_lossless:
-        _run_lossless(info, input_codec, output_path, options)
-    else:
-        _run_reencode(info, input_codec, encoder, output_path, options,
-                      dv_profile5=(info.dv_profile == 5))
+    _check_disk_space(info, options, estimated_bytes=plan.estimated_temp_bytes)
+
+    with OutputTransaction(Path(plan.output_path), force=options.force) as output:
+        staging_path = str(output.staging_path)
+        if plan.pipeline is PipelineKind.LOSSLESS_RPU_STRIP:
+            _run_lossless(
+                info, input_codec, staging_path, options,
+                final_output_path=plan.output_path,
+                plan=plan,
+            )
+        else:
+            _run_reencode(
+                info, input_codec, encoder, staging_path, options,
+                dv_profile5=(plan.profile == 5),
+                final_output_path=plan.output_path,
+                plan=plan,
+            )
+        if not options.unsafe_skip_validation:
+            report = validate_staged_output(
+                info, staging_path, plan,
+                sample_seconds=options.sample_seconds,
+            )
+            if not report.valid:
+                details = "; ".join(
+                    f"{issue.code.value}: {issue.message}"
+                    for issue in report.errors
+                )
+                raise RuntimeError(f"Output validation failed: {details}")
+        output.publish()
 
 
 # ---------------------------------------------------------------------------
@@ -250,11 +305,14 @@ def convert(input_path: str, output_path: str, options: ConvertOptions) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_lossless(info: FileInfo, input_codec: InputCodec,
-                  output_path: str, options: ConvertOptions) -> None:
+                  output_path: str, options: ConvertOptions,
+                  final_output_path: str = "",
+                  plan: ConversionPlan | None = None) -> None:
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
     ctx = PipelineContext(
         info=info, input_codec=input_codec, output_path=output_path,
-        options=options, tmp_dir=tmp_dir,
+        options=options, tmp_dir=tmp_dir, final_output_path=final_output_path,
+        plan=plan,
         raw_path=os.path.join(tmp_dir, f"video{input_codec.raw_extension}"),
         rpu_path=os.path.join(tmp_dir, "rpu.bin"),
         clean_path=os.path.join(tmp_dir, f"clean{input_codec.raw_extension}"),
@@ -279,11 +337,14 @@ def _run_lossless(info: FileInfo, input_codec: InputCodec,
 
 def _run_reencode(info: FileInfo, input_codec: InputCodec, encoder: Encoder,
                   output_path: str, options: ConvertOptions,
-                  dv_profile5: bool = True) -> None:
+                  dv_profile5: bool = True,
+                  final_output_path: str = "",
+                  plan: ConversionPlan | None = None) -> None:
     tmp_dir = tempfile.mkdtemp(prefix="de_dolby_", dir=options.temp_dir)
     ctx = PipelineContext(
         info=info, input_codec=input_codec, output_path=output_path,
-        options=options, tmp_dir=tmp_dir,
+        options=options, tmp_dir=tmp_dir, final_output_path=final_output_path,
+        plan=plan,
         raw_path=os.path.join(tmp_dir, f"video{input_codec.raw_extension}"),
         rpu_path=os.path.join(tmp_dir, "rpu.bin"),
         encoded_path=os.path.join(tmp_dir, f"encoded{encoder.output_extension}"),
@@ -389,15 +450,15 @@ def _extract_audio_subs(input_path: str, sample_seconds: int, output_path: str) 
 
 
 def _remux(output_path: str, video_path: str, meta: HDR10Metadata,
-           info: FileInfo, options: ConvertOptions, audio_subs_path: str) -> None:
+           info: FileInfo, options: ConvertOptions, audio_subs_path: str,
+           plan: ConversionPlan) -> None:
     cmd = ["-o", output_path]
     cmd += meta.mkvmerge_args(track_id=0)
     cmd.append(video_path)
-    cmd += ["-D"]
-    if options.sample_seconds:
-        cmd.append(audio_subs_path)
-    else:
-        cmd.append(info.path)
+    source_path = audio_subs_path if options.sample_seconds else info.path
+    cmd += build_source_remux_args(
+        plan, source_path, sample_source=options.sample_seconds is not None
+    )
     run_mkvmerge(cmd)
 
 
@@ -446,12 +507,17 @@ def _libplacebo_tonemap_filter() -> str:
     )
 
 
-def _check_disk_space(info: FileInfo, options: ConvertOptions) -> None:
-    if not info.overall_bitrate or not info.duration:
+def _check_disk_space(
+    info: FileInfo,
+    options: ConvertOptions,
+    estimated_bytes: int | None = None,
+) -> None:
+    if estimated_bytes is None and (not info.overall_bitrate or not info.duration):
         return
-    duration = options.sample_seconds or info.duration
-    source_bytes = (info.overall_bitrate * duration) / 8
-    estimated_bytes = int(source_bytes * 3)
+    if estimated_bytes is None:
+        duration = options.sample_seconds or info.duration
+        source_bytes = (info.overall_bitrate * duration) / 8
+        estimated_bytes = int(source_bytes * 3)
     temp_dir = options.temp_dir or tempfile.gettempdir()
     try:
         usage = shutil.disk_usage(temp_dir)
@@ -467,9 +533,12 @@ def _check_disk_space(info: FileInfo, options: ConvertOptions) -> None:
 
 def _cleanup_temp(tmp_dir: str) -> None:
     try:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-    except Exception:
-        pass
+        shutil.rmtree(tmp_dir)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        print(f"Warning: could not clean temporary directory {tmp_dir}: {exc}",
+              file=sys.stderr)
 
 
 def _format_size(info: FileInfo) -> str:

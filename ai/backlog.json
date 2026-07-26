@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "DD-001",
+      "title": "Environment preflight diagnostics",
+      "priority": 1,
+      "status": "done",
+      "prd": "ai/prds/DD-001-preflight.md",
+      "depends_on": []
+    },
+    {
+      "id": "DD-002",
+      "title": "Inspectable conversion plans",
+      "priority": 2,
+      "status": "done",
+      "prd": "ai/prds/DD-002-conversion-plan.md",
+      "depends_on": [
+        "DD-001"
+      ]
+    },
+    {
+      "id": "DD-003",
+      "title": "Transactional output writes",
+      "priority": 3,
+      "status": "done",
+      "prd": "ai/prds/DD-003-transactional-output.md",
+      "depends_on": [
+        "DD-002"
+      ]
+    },
+    {
+      "id": "DD-004",
+      "title": "Stream fidelity contract",
+      "priority": 4,
+      "status": "done",
+      "prd": "ai/prds/DD-004-stream-fidelity.md",
+      "depends_on": [
+        "DD-002"
+      ]
+    },
+    {
+      "id": "DD-005",
+      "title": "Post-conversion validation",
+      "priority": 5,
+      "status": "done",
+      "prd": "ai/prds/DD-005-output-validation.md",
+      "depends_on": [
+        "DD-003",
+        "DD-004"
+      ]
+    },
+    {
+      "id": "DD-006",
+      "title": "Resumable batch manifests",
+      "priority": 6,
+      "status": "done",
+      "prd": "ai/prds/DD-006-resumable-batches.md",
+      "depends_on": [
+        "DD-003",
+        "DD-005"
+      ]
+    },
+    {
+      "id": "DD-007",
+      "title": "Reusable conversion presets",
+      "priority": 7,
+      "status": "done",
+      "prd": "ai/prds/DD-007-presets.md",
+      "depends_on": [
+        "DD-002"
+      ]
+    },
+    {
+      "id": "DD-008",
+      "title": "Cancellation and cleanup hardening",
+      "priority": 8,
+      "status": "done",
+      "prd": "ai/prds/DD-008-cancellation.md",
+      "depends_on": [
+        "DD-003"
+      ]
+    },
+    {
+      "id": "DD-009",
+      "title": "Hermetic media integration suite",
+      "priority": 9,
+      "status": "done",
+      "prd": "ai/prds/DD-009-integration-suite.md",
+      "depends_on": [
+        "DD-004",
+        "DD-005"
+      ]
+    },
+    {
+      "id": "DD-010",
+      "title": "Ralph backlog lifecycle",
+      "priority": 10,
+      "status": "done",
+      "prd": "ai/prds/DD-010-ralph-lifecycle.md",
+      "depends_on": []
+    }
+  ]
+}

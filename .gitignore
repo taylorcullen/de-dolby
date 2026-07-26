@@ -49,6 +49,7 @@ coverage.xml
 *.py.cover
 .hypothesis/
 .pytest_cache/
+.pytest-tmp/
 cover/
 
 # Translations
@@ -210,10 +211,3 @@ __marimo__/
 *.mkv
 *.mp4
 *.ts
-
-# Claude Code / Claude Flow
-.claude/
-.claude-flow/
-.swarm/
-.mcp.json
-CLAUDE.md

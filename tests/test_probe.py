@@ -18,6 +18,7 @@ SAMPLE_FFPROBE_OUTPUT = {
     "format": {
         "duration": "5400.123",
         "bit_rate": "25000000",
+        "tags": {"title": "Feature", "encoder": "mkvmerge"},
     },
     "streams": [
         {
@@ -54,9 +55,27 @@ SAMPLE_FFPROBE_OUTPUT = {
             "index": 2,
             "codec_type": "subtitle",
             "codec_name": "subrip",
-            "disposition": {"default": 0},
-            "tags": {"language": "eng"},
+            "disposition": {"default": 0, "forced": 1},
+            "tags": {"language": "eng", "title": "Forced signs"},
         },
+        {
+            "index": 3,
+            "codec_type": "attachment",
+            "codec_name": "ttf",
+            "disposition": {},
+            "tags": {
+                "filename": "subtitle-font.ttf",
+                "mimetype": "application/x-truetype-font",
+            },
+        },
+    ],
+    "chapters": [
+        {
+            "id": 0,
+            "start_time": "0.000000",
+            "end_time": "60.000000",
+            "tags": {"title": "Opening", "language": "eng"},
+        }
     ],
     "frames": [],
 }
@@ -102,6 +121,28 @@ def test_probe_audio_and_subs(mock_ffprobe):
 
     assert len(info.subtitle_streams) == 1
     assert info.subtitle_streams[0].codec_name == "subrip"
+    assert info.subtitle_streams[0].forced is True
+    assert info.subtitle_streams[0].title == "Forced signs"
+
+
+@patch("de_dolby.probe.run_ffprobe")
+def test_probe_inventories_attachments_chapters_and_tags(mock_ffprobe):
+    mock_ffprobe.return_value = _mock_ffprobe_result(SAMPLE_FFPROBE_OUTPUT)
+
+    info = probe("test.mkv")
+
+    assert info.tags == {"title": "Feature", "encoder": "mkvmerge"}
+    assert len(info.attachment_streams) == 1
+    attachment = info.attachment_streams[0]
+    assert attachment.filename == "subtitle-font.ttf"
+    assert attachment.mimetype == "application/x-truetype-font"
+    assert attachment.tags["filename"] == "subtitle-font.ttf"
+    assert len(info.chapters) == 1
+    assert info.chapters[0].title == "Opening"
+    assert info.chapters[0].start_time == 0.0
+    assert info.chapters[0].end_time == 60.0
+    assert info.chapters[0].tags["language"] == "eng"
+    assert "-show_chapters" in mock_ffprobe.call_args.args[0]
 
 
 @patch("de_dolby.probe.run_ffprobe")

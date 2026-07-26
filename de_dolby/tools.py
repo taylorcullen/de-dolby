@@ -5,6 +5,12 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from de_dolby.process import (
+    ProcessFailed,
+    ProcessRequest,
+    ProcessTimedOut,
+    default_runner,
+)
 
 
 @dataclass
@@ -74,31 +80,30 @@ def _run(cmd: list[str], *, capture: bool = True, check: bool = True,
     if _verbose:
         print(f"  [cmd] {' '.join(cmd)}", file=sys.stderr)
     _log(f"$ {' '.join(cmd)}")
-    stdin = subprocess.PIPE if (stdin_data is not None or pipe_stdin) else None
-    stdout = subprocess.PIPE if capture else None
-    stderr = subprocess.PIPE
     try:
-        result = subprocess.run(
-            cmd, stdin=stdin, stdout=stdout, stderr=stderr,
-            input=stdin_data, check=False, timeout=_timeout_seconds,
+        result = default_runner.run(
+            ProcessRequest(
+                tuple(cmd),
+                capture_stdout=capture,
+                stdin_data=stdin_data,
+                pipe_stdin=pipe_stdin,
+                timeout_seconds=_timeout_seconds,
+                check=check,
+            )
         )
-    except subprocess.TimeoutExpired:
+    except ProcessTimedOut:
         _log(f"TIMEOUT after {_timeout_seconds}s")
-        raise RuntimeError(
-            f"Command timed out after {_timeout_seconds}s: {' '.join(cmd)}"
-        )
+        raise
+    except ProcessFailed as exc:
+        _log(f"exit={exc.returncode}")
+        if exc.stderr:
+            _log(exc.stderr.strip())
+        raise
     _log(f"exit={result.returncode}")
     if result.stderr:
         stderr_text = result.stderr.decode(errors="replace").strip()
         if stderr_text:
             _log(stderr_text)
-    if check and result.returncode != 0:
-        err = result.stderr.decode(errors="replace") if result.stderr else ""
-        out = result.stdout.decode(errors="replace") if result.stdout else ""
-        detail = err or out
-        raise RuntimeError(
-            f"Command failed (exit {result.returncode}): {' '.join(cmd)}\n{detail}"
-        )
     return result
 
 

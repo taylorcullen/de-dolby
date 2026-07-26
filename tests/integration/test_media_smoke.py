@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from tests.integration.fixture_generator import generate_fixture
+from .fixture_generator import generate_fixture
 from de_dolby.fidelity import build_source_remux_args
 from de_dolby.plan import create_conversion_plan
 from de_dolby.probe import probe

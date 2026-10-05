@@ -32,16 +32,25 @@ def test_tui_add_plan_reorder_remove_and_exit(tmp_path):
             path_input = app.query_one("#path-input", Input)
             path_input.value = "first.DV.mkv"
             await pilot.press("enter")
+            await pilot.pause()
+            assert len(app.backend.model.items) == 1
+            assert app.query_one("#queue-list").has_focus
             await pilot.press("a")
+            await pilot.pause()
+            assert path_input.has_focus
             path_input.value = "second.DV.mkv"
             await pilot.press("enter")
+            await pilot.pause()
             assert len(app.backend.model.items) == 2
 
             await pilot.press("p")
+            await pilot.pause()
             assert app.backend.model.selected.status is QueueStatus.READY
             await pilot.press("ctrl+down")
+            await pilot.pause()
             assert app.backend.model.selected_index == 1
             await pilot.press("delete")
+            await pilot.pause()
             assert len(app.backend.model.items) == 1
             await pilot.press("q")
     run(scenario())

@@ -1,11 +1,14 @@
 """Progress reporting for conversion pipeline with progress bars."""
 
 import re
+import math
 import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
+from statistics import median
 
 from de_dolby.utils import Colors as _C
 from de_dolby.process import (
@@ -20,6 +23,83 @@ _BAR_FILL = "\u2588"   # █
 _BAR_EMPTY = "\u2591"  # ░
 _BAR_WIDTH = 30
 _CHECK = "\u2713"      # ✓
+
+
+def calculate_eta_seconds(
+    duration_seconds: float | None,
+    processed_seconds: float | None,
+    speed_multiplier: float | None,
+) -> float | None:
+    """Return remaining wall-clock seconds, or ``None`` when not estimable."""
+    try:
+        duration = float(duration_seconds)
+        processed = float(processed_seconds)
+        speed = float(speed_multiplier)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not all(math.isfinite(value) for value in (duration, processed, speed))
+        or duration <= 0
+        or processed < 0
+        or speed <= 0
+    ):
+        return None
+    return max(0.0, duration - processed) / speed
+
+
+def format_eta(seconds: float | None) -> str | None:
+    """Format an ETA using minutes/seconds and optional hours."""
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    total = math.ceil(value)
+    minutes, remaining_seconds = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {remaining_seconds:02d}s"
+    return f"{minutes}m {remaining_seconds:02d}s"
+
+
+def effective_progress_duration(
+    source_duration: float | None, sample_seconds: int | None
+) -> float | None:
+    """Return the media duration represented by an encode progress bar."""
+    if sample_seconds is None:
+        return source_duration
+    if source_duration is None:
+        return float(sample_seconds)
+    return min(float(sample_seconds), float(source_duration))
+
+
+class EtaEstimator:
+    """Smooth FFmpeg speed samples and estimate remaining wall-clock time."""
+
+    def __init__(self, window_size: int = 5):
+        if window_size <= 0:
+            raise ValueError("window_size must be positive")
+        self._speeds: deque[float] = deque(maxlen=window_size)
+
+    def reset(self) -> None:
+        self._speeds.clear()
+
+    def update(
+        self,
+        duration_seconds: float | None,
+        processed_seconds: float | None,
+        speed_multiplier: float | None,
+    ) -> float | None:
+        candidate = calculate_eta_seconds(
+            duration_seconds, processed_seconds, speed_multiplier
+        )
+        if candidate is None:
+            return None
+        self._speeds.append(float(speed_multiplier))
+        return calculate_eta_seconds(
+            duration_seconds, processed_seconds, median(self._speeds)
+        )
 
 
 @dataclass
@@ -65,10 +145,12 @@ class ProgressReporter:
         self._pulse_running = False
         self._pulse_idx = 0
         self._desc_width = max(len(s.description) for s in steps)
+        self._eta = EtaEstimator()
 
     def begin_step(self, step_name: str, extra: str = "") -> None:
         """Mark a step as started."""
         self._stop_pulse()
+        self._eta.reset()
 
         # Find step index
         for i, s in enumerate(self.steps):
@@ -98,7 +180,10 @@ class ProgressReporter:
     def update_encoding_progress(self, percent: float | None = None,
                                   fps: float | None = None,
                                   speed: str | None = None,
-                                  time_str: str | None = None) -> None:
+                                  time_str: str | None = None,
+                                  time_seconds: float | None = None,
+                                  speed_multiplier: float | None = None,
+                                  duration: float | None = None) -> None:
         """Update encoding progress with a progress bar on the current line."""
         self._stop_pulse()
         step = self.steps[self.current_step] if self.current_step < len(self.steps) else None
@@ -122,6 +207,10 @@ class ProgressReporter:
             parts.append(f"{fps:.1f} fps")
         if speed:
             parts.append(speed)
+        eta = self._eta.update(duration, time_seconds, speed_multiplier)
+        eta_text = format_eta(eta)
+        if eta_text:
+            parts.append(f"ETA {eta_text}")
         if parts:
             sys.stderr.write(f"  {_C.DIM}{'  '.join(parts)}{_C.RESET}")
 
@@ -241,6 +330,10 @@ def parse_ffmpeg_progress(line: str, duration: float | None) -> dict | None:
     m = re.search(r"speed=\s*([\d.]+x)", line)
     if m:
         info["speed"] = m.group(1)
+        try:
+            info["speed_multiplier"] = float(m.group(1)[:-1])
+        except ValueError:
+            pass
 
     return info if info else None
 
@@ -284,6 +377,9 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
                             fps=progress.get("fps"),
                             speed=progress.get("speed"),
                             time_str=progress.get("time_str"),
+                            time_seconds=progress.get("time_seconds"),
+                            speed_multiplier=progress.get("speed_multiplier"),
+                            duration=duration,
                         )
             break
         stderr_data += chunk
@@ -310,6 +406,9 @@ def run_ffmpeg_with_progress(cmd: list[str], duration: float | None,
                         fps=progress.get("fps"),
                         speed=progress.get("speed"),
                         time_str=progress.get("time_str"),
+                        time_seconds=progress.get("time_seconds"),
+                        speed_multiplier=progress.get("speed_multiplier"),
+                        duration=duration,
                     )
 
     process.wait()

@@ -35,9 +35,23 @@ class HarnessTests(unittest.TestCase):
             shutil.copy2(source / relative_path, root / relative_path)
         backlog_path = root / "ai/backlog.json"
         backlog = json.loads(backlog_path.read_text(encoding="utf-8"))
-        next(
-            item for item in backlog["items"] if item["id"] == "DD-010"
-        )["status"] = "ready"
+        for item in backlog["items"]:
+            if item["id"] == "DD-010":
+                item["status"] = "ready"
+            elif item["status"] != "done":
+                item["status"] = "blocked"
+                item_prd = root / item["prd"]
+                item_text = item_prd.read_text(encoding="utf-8")
+                item_prd.write_text(
+                    re.sub(
+                        r"^Status:.*$",
+                        "Status: Blocked  ",
+                        item_text,
+                        count=1,
+                        flags=re.MULTILINE,
+                    ),
+                    encoding="utf-8",
+                )
         backlog_path.write_text(json.dumps(backlog, indent=2) + "\n", encoding="utf-8")
         prd_path = root / "ai/prds/DD-010-ralph-lifecycle.md"
         prd_text = prd_path.read_text(encoding="utf-8")
@@ -64,8 +78,11 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("product", config["scopes"])
         self.assertIn("harness", config["scopes"])
         backlog = load_backlog(root, config)
-        self.assertEqual(len(backlog["items"]), 10)
-        self.assertEqual(len({item["id"] for item in backlog["items"]}), 10)
+        self.assertGreaterEqual(len(backlog["items"]), 10)
+        self.assertEqual(
+            len({item["id"] for item in backlog["items"]}),
+            len(backlog["items"]),
+        )
 
     def test_missing_context_file_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -151,7 +168,8 @@ class HarnessTests(unittest.TestCase):
         with patch("builtins.print") as output:
             self.assertEqual(ralph_status(backlog), 0)
         self.assertEqual(backlog, before)
-        self.assertIn("DD-010", output.call_args_list[-1].args[0])
+        rendered = [call.args[0] for call in output.call_args_list]
+        self.assertTrue(any("DD-010" in line for line in rendered))
 
     def test_ralph_start_dry_run_does_not_modify_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -268,7 +286,9 @@ class HarnessTests(unittest.TestCase):
         config = load_config(root)
         backlog = load_backlog(root, config)
         dd_010 = next(item for item in backlog["items"] if item["id"] == "DD-010")
-        dd_010["status"] = "blocked"
+        for item in backlog["items"]:
+            if item["status"] == "ready" or item["id"] == "DD-010":
+                item["status"] = "blocked"
         with self.assertRaisesRegex(HarnessError, "no executable PRDs"):
             show_ralph_prompt(root, backlog, None)
 

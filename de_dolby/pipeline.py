@@ -19,7 +19,7 @@ from de_dolby.plan import ConversionPlan, PipelineKind, create_conversion_plan
 from de_dolby.probe import FileInfo, probe
 from de_dolby.progress import (
     ProgressReporter, STEPS_LOSSLESS, STEPS_REENCODE,
-    run_ffmpeg_with_progress,
+    effective_progress_duration, run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
     check_encoder_available, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
@@ -162,7 +162,9 @@ def _step_strip_rpu(ctx: PipelineContext) -> None:
 
 def _step_encode(ctx: PipelineContext) -> None:
     assert ctx.encoder is not None
-    encode_duration = ctx.options.sample_seconds or ctx.info.duration
+    encode_duration = effective_progress_duration(
+        ctx.info.duration, ctx.options.sample_seconds
+    )
     ffmpeg_cmd = _build_encode_cmd(
         ctx.info.path, ctx.encoded_path, ctx.encoder, ctx.meta, ctx.options,
         video_only=True,
@@ -359,7 +361,9 @@ def _run_reencode(info: FileInfo, input_codec: InputCodec, encoder: Encoder,
 
     def _step_encode_with_progress(ctx: PipelineContext) -> None:
         assert ctx.encoder is not None
-        encode_duration = ctx.options.sample_seconds or ctx.info.duration
+        encode_duration = effective_progress_duration(
+            ctx.info.duration, ctx.options.sample_seconds
+        )
         ffmpeg_cmd = _build_encode_cmd(
             ctx.info.path, ctx.encoded_path, ctx.encoder, ctx.meta, ctx.options,
             video_only=True,

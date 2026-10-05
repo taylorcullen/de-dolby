@@ -43,7 +43,8 @@ def test_full_remux_args_select_tracks_metadata_attachments_and_chapters():
     assert ["--audio-tracks", "1"] == args[1:3]
     assert args[args.index("--subtitle-tracks") + 1] == "2"
     assert args[args.index("--attachments") + 1] == "3"
-    assert args[args.index("--chapters") + 1] == "all"
+    assert "--chapters" not in args
+    assert "--no-chapters" not in args
     assert "1:eng" in args
     assert "1:Main audio" in args
     assert "1:1" in args

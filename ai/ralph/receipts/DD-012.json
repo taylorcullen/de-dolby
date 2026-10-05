@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "item_id": "DD-012",
+  "result": "passed",
+  "scope": "all",
+  "prd_sha256": "48b43b35a367c20052c19e84469b3d7282d409de01d448984fed25ebd83800f9",
+  "verified_at": "2026-07-27T08:25:21.367996+00:00"
+}

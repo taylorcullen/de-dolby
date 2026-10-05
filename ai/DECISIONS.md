@@ -1,5 +1,27 @@
 # Decision log
 
+## 2026-10-05 — Preserve embedded chapters using mkvmerge defaults
+
+Full conversions leave chapter copying enabled on the MKV source input;
+`--chapters` imports an external chapter file and does not accept `all` as
+a selection keyword. Samples still use `--no-chapters`. The generated-media
+integration suite executes planned source arguments and verifies embedded
+chapters survive, rather than only inspecting the constructed command.
+
+## 2026-07-26 — Use Textual as an optional TUI dependency
+
+The interactive queue uses Textual 8.x for cross-platform widgets, async
+workers, and first-party headless testing. Textual is loaded only by
+`de-dolby tui` and is distributed through the `tui` extra so existing CLI
+commands retain the base dependency footprint.
+
+## 2026-07-26 — Derive encode ETA from a rolling median speed
+
+The active encode ETA divides remaining media time by the median of the five
+most recent valid FFmpeg speed multipliers. The estimator resets between steps,
+omits unavailable data, and does not claim to estimate non-encode pipeline
+work.
+
 ## 2026-07-26 — Bind Ralph completion to recoverable state and evidence
 
 Ralph lifecycle changes use atomic sibling writes plus a transaction journal

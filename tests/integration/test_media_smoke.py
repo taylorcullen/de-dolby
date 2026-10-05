@@ -71,3 +71,35 @@ def test_real_probe_drives_fidelity_and_broken_map_is_rejected(tmp_path):
     assert ValidationCode.STREAM_MISSING in {
         issue.code for issue in report.errors
     }
+
+
+def test_planned_source_remux_preserves_embedded_chapters(tmp_path):
+    ffmpeg = _tool("ffmpeg")
+    _tool("ffprobe")
+    mkvmerge = _tool("mkvmerge")
+    fixture = tmp_path / "fixture.mkv"
+    source = tmp_path / "source.mkv"
+    output = tmp_path / "output.mkv"
+    chapters = tmp_path / "chapters.txt"
+    generate_fixture(ffmpeg, fixture)
+    chapters.write_text(
+        "CHAPTER01=00:00:00.000\nCHAPTER01NAME=Opening\n", encoding="utf-8"
+    )
+    subprocess.run(
+        [mkvmerge, "-o", str(source), "--chapters", str(chapters), str(fixture)],
+        check=True, capture_output=True,
+    )
+    info = probe(str(source))
+    info.dv_profile = 7
+    info.video_streams[0].codec_name = "hevc"
+    plan = create_conversion_plan(info, str(output))
+    args = build_source_remux_args(plan, str(source), sample_source=False)
+    subprocess.run(
+        [mkvmerge, "-o", str(output), "--no-audio", str(fixture), *args],
+        check=True, capture_output=True,
+    )
+    result = probe(str(output))
+    assert len(info.chapters) == len(result.chapters) == 1
+    assert result.chapters[0].title == "Opening"
+    assert result.chapters[0].start_time == info.chapters[0].start_time
+    assert len(result.video_streams) == len(result.audio_streams) == 1

@@ -65,6 +65,28 @@ de-dolby convert movie.mkv
 
 That's it. de-dolby auto-detects the DV profile, picks the best GPU encoder, and outputs an HDR10 MKV.
 
+### Interactive terminal queue
+
+Install the optional Textual interface and launch it with:
+
+```bash
+pip install -e ".[tui]"
+de-dolby tui
+```
+
+The TUI can browse local folders, Windows UNC shares such as
+`\\server\share\media`, mapped drives, and SMB/NFS shares mounted by the
+operating system. It does not mount shares or store credentials. Slow,
+unavailable, or permission-denied network locations are reported without
+blocking the interface.
+
+Use `a` to add a path, `Delete` to remove, `Ctrl+Up`/`Ctrl+Down` to reorder,
+`p` to review a plan, `s` to start the sequential queue, `c` to cancel the
+active conversion, and `r` to retry an interrupted or failed item. Press `?`
+for the complete in-app key reference. Queue state is saved under the platform
+application-data directory by default; use `de-dolby tui --queue PATH` for an
+explicit state file.
+
 ---
 
 ## How It Works
@@ -224,6 +246,13 @@ diagnosis when a known ffprobe limitation causes a false failure; it can
 publish malformed output and should not be used routinely.
 
 ### Quality control
+
+During re-encoding, the progress line shows percentage, frame rate, FFmpeg
+speed, and a smoothed estimate for the active encoding step, for example
+`ETA 12m 34s`. Estimates of an hour or more include hours. ETA is omitted
+during startup or when the source duration or FFmpeg speed is unavailable; it
+does not attempt to predict extraction, remuxing, validation, or an entire
+multi-file batch.
 
 ```bash
 # Quality presets

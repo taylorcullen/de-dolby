@@ -66,11 +66,9 @@ def build_source_remux_args(
         ["--attachments", ",".join(attachments)]
         if attachments else ["--no-attachments"]
     )
-    args += (
-        ["--chapters", "all"]
-        if plan.stream_policy.chapters is StreamAction.PRESERVE
-        else ["--no-chapters"]
-    )
+    # MKV chapters are copied by default; --chapters takes an external filename.
+    if plan.stream_policy.chapters is StreamAction.OMIT:
+        args += ["--no-chapters"]
     if plan.stream_policy.tags is StreamAction.OMIT:
         args += ["--no-global-tags", "--no-track-tags"]
     args += _track_metadata_args(plan)

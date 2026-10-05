@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-10-05 — Preserve embedded chapters using mkvmerge defaults
+
+Full conversions leave chapter copying enabled on the MKV source input;
+`--chapters` imports an external chapter file and does not accept `all` as
+a selection keyword. Samples still use `--no-chapters`. The generated-media
+integration suite executes planned source arguments and verifies embedded
+chapters survive, rather than only inspecting the constructed command.
+
 ## 2026-07-26 — Bind Ralph completion to recoverable state and evidence
 
 Ralph lifecycle changes use atomic sibling writes plus a transaction journal

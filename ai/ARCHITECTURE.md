@@ -13,6 +13,9 @@
 - `de_dolby/settings.py` loads versioned user configuration and resolves typed
   conversion settings using defaults, named presets, and CLI precedence.
 - `de_dolby/metadata.py` derives HDR10 metadata.
+- `de_dolby/hdr10plus.py` verifies preserved HEVC HDR10+ metadata and owns
+  experimental sampled-pixel Profile A generation and injection. It analyses
+  converted HDR10 pixels rather than translating Dolby Vision RPU values.
 - `de_dolby/manifest.py` owns versioned resumable-batch state, identities,
   fingerprints, and atomic persistence.
 - `de_dolby/output.py` owns sibling staging files and atomic output

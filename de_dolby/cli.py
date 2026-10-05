@@ -65,7 +65,7 @@ def _expand_globs(paths: list[str]) -> list[str]:
     return expanded
 
 
-def derive_output_name(input_path: str) -> str:
+def derive_output_name(input_path: str, hdr10plus: str = "off") -> str:
     """Derive an HDR10 output filename from the input path.
 
     If the filename contains '.DV.' (case-insensitive), replace it with '.HDR10.'.
@@ -75,6 +75,12 @@ def derive_output_name(input_path: str) -> str:
         '2x03 - Secrets.DV.mkv'  -> '2x03 - Secrets.HDR10.mkv'
         '2x03 - Secrets.mkv'     -> '2x03 - Secrets.HDR10.mkv'
     """
+    if hdr10plus != "off":
+        normal = derive_output_name(input_path)
+        suffix = Path(input_path).suffix
+        stem = normal[:-len(suffix)] if suffix else normal
+        return stem.removesuffix(".HDR10") + ".HDR10Plus" + suffix
+
     # Try replacing .DV. (case-insensitive) with .HDR10.
     replaced = re.sub(
         r"\.DV\.", ".HDR10.", input_path, count=1, flags=re.IGNORECASE
@@ -130,6 +136,9 @@ def main() -> None:
         "--unsafe-skip-validation", action="store_true", default=None,
         help="UNSAFE: publish output without post-conversion validation",
     )
+    p_convert.add_argument("--hdr10plus", choices=["off", "preserve", "generate"], default=None,
+                           help="HDR10+ mode: preserve existing metadata or generate experimental Profile A")
+    p_convert.add_argument("--hdr10plus-tool", help="Path to hdr10plus_tool binary")
     p_convert.add_argument("--ffmpeg", help="Path to ffmpeg binary")
     p_convert.add_argument("--dovi-tool", help="Path to dovi_tool binary")
     p_convert.add_argument("--mkvmerge", help="Path to mkvmerge binary")
@@ -187,6 +196,8 @@ def main() -> None:
     p_plan.add_argument("--json", action="store_true",
                         help="Output the versioned plan JSON schema")
     p_plan.add_argument("--ffmpeg", help="Path to ffmpeg binary")
+    p_plan.add_argument("--hdr10plus", choices=["off", "preserve", "generate"], default=None)
+    p_plan.add_argument("--hdr10plus-tool", help="Path to hdr10plus_tool binary")
 
     # validate subcommand
     p_validate = sub.add_parser(
@@ -199,6 +210,8 @@ def main() -> None:
     p_validate.add_argument("--json", action="store_true",
                             help="Output versioned validation JSON")
     p_validate.add_argument("--ffmpeg", help="Path to ffmpeg binary")
+    p_validate.add_argument("--hdr10plus", choices=["off", "preserve", "generate"], default="off")
+    p_validate.add_argument("--hdr10plus-tool", help="Path to hdr10plus_tool binary")
 
     # config subcommand
     p_config = sub.add_parser("config", help="Inspect conversion configuration")
@@ -231,6 +244,7 @@ def main() -> None:
         ffmpeg=getattr(args, "ffmpeg", None),
         dovi_tool=getattr(args, "dovi_tool", None),
         mkvmerge=getattr(args, "mkvmerge", None),
+        hdr10plus_tool=getattr(args, "hdr10plus_tool", None),
     )
 
     if args.command == "doctor":
@@ -273,7 +287,9 @@ def _cmd_plan(args: argparse.Namespace) -> None:
     output_path = args.output or derive_output_name(args.input)
     try:
         effective = _effective_settings(args)
+        output_path = args.output or derive_output_name(args.input, effective.hdr10plus)
         options = ConvertOptions(
+            hdr10plus=effective.hdr10plus,
             encoder=effective.encoder,
             quality=effective.quality,
             crf=effective.crf,
@@ -327,7 +343,7 @@ def _cmd_validate(args: argparse.Namespace) -> None:
     if args.sample is not None and args.sample <= 0:
         print("Error: --sample must be a positive number of seconds", file=sys.stderr)
         sys.exit(2)
-    options = ConvertOptions(sample_seconds=args.sample, dry_run=True)
+    options = ConvertOptions(sample_seconds=args.sample, hdr10plus=args.hdr10plus, dry_run=True)
     try:
         plan = plan_conversion(args.input, args.output, options)
         input_info = probe(args.input)
@@ -509,6 +525,7 @@ def _cmd_convert(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     options = ConvertOptions(
+        hdr10plus=effective.hdr10plus,
         encoder=effective.encoder,
         quality=effective.quality,
         crf=effective.crf,
@@ -562,7 +579,7 @@ def _cmd_convert(args: argparse.Namespace) -> None:
         if args.output:
             output_path = args.output
         else:
-            output_path = derive_output_name(input_path)
+            output_path = derive_output_name(input_path, effective.hdr10plus)
 
         manifest_key = None
         try:
@@ -690,6 +707,7 @@ def _effective_settings(args: argparse.Namespace):
     layers.append((
         "CLI",
         ConversionSettings(
+            hdr10plus=getattr(args, "hdr10plus", None),
             encoder=getattr(args, "encoder", None),
             quality=getattr(args, "quality", None),
             crf=getattr(args, "crf", None),

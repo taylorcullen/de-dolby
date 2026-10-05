@@ -33,6 +33,7 @@ HELP_TEXT = """\
   Ctrl+Up/Down     Reorder selected item
   p                Plan selected item
   e                Apply key=value setting
+                   HDR10+: hdr10plus=preserve or hdr10plus=generate (experimental)
   r                Retry failed/interrupted item
   s                Start sequential queue
   c                Cancel active conversion

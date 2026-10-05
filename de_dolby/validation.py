@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import tempfile
 
 from de_dolby.codecs import ENCODERS
 from de_dolby.plan import ConversionPlan, StreamAction
@@ -30,6 +31,7 @@ class ValidationCode(str, Enum):
     DOLBY_VISION_PRESENT = "dolby_vision_present"
     STREAM_MISSING = "stream_missing"
     STREAM_METADATA_MISMATCH = "stream_metadata_mismatch"
+    HDR10PLUS_INVALID = "hdr10plus_invalid"
 
 
 @dataclass(frozen=True)
@@ -293,6 +295,16 @@ def validate_staged_output(
                 ),
             ),
         )
-    return compare_output_to_plan(
+    report = compare_output_to_plan(
         input_info, output_info, plan, sample_seconds=sample_seconds
     )
+    if plan.hdr10plus != "off":
+        from de_dolby.hdr10plus import verify_metadata
+        try:
+            with tempfile.TemporaryDirectory(prefix="de_dolby_verify_", dir=plan.temp_dir) as directory:
+                verify_metadata(output_path, directory)
+        except (OSError, RuntimeError, ValueError) as exc:
+            return ValidationReport(report.input_path, report.output_path, report.issues + (
+                _issue(ValidationCode.HDR10PLUS_INVALID, f"HDR10+ verification failed: {exc}"),
+            ))
+    return report

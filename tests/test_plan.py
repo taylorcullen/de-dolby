@@ -174,6 +174,7 @@ def test_plan_json_schema_is_explicit_and_stable():
         "pipeline": "lossless_rpu_strip",
         "encoder": "copy",
         "settings": {
+            "hdr10plus": "off",
             "quality": "balanced",
             "crf": None,
             "bitrate": None,

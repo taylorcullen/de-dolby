@@ -19,6 +19,7 @@ class SettingsError(ValueError):
 class ConversionSettings:
     """A partial settings layer; ``None`` means no value was supplied."""
 
+    hdr10plus: str | None = None
     encoder: str | None = None
     quality: str | None = None
     crf: int | None = None
@@ -31,6 +32,7 @@ class ConversionSettings:
 
 @dataclass(frozen=True)
 class EffectiveSettings:
+    hdr10plus: str = "off"
     encoder: str = "auto"
     quality: str = "balanced"
     crf: int | None = None
@@ -158,6 +160,8 @@ def merge_settings(
 
 
 def _validate_values(settings: ConversionSettings, source: str) -> None:
+    if settings.hdr10plus is not None and settings.hdr10plus not in {"off", "preserve", "generate"}:
+        raise SettingsError(f"{source}.hdr10plus: expected off, preserve, or generate")
     if settings.encoder is not None:
         allowed = {"auto", "copy", *ENCODERS}
         if not isinstance(settings.encoder, str) or settings.encoder not in allowed:

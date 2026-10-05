@@ -13,22 +13,24 @@ from de_dolby.config import DEFAULT_MASTER_DISPLAY, DEFAULT_MAX_CLL, DEFAULT_MAX
 from de_dolby.utils import format_bytes
 from de_dolby.display import display_banner
 from de_dolby.fidelity import build_source_remux_args
+from de_dolby.hdr10plus import prepare_video, verify_metadata
 from de_dolby.metadata import HDR10Metadata, extract_rpu, parse_rpu_metadata
 from de_dolby.output import OutputTransaction
 from de_dolby.plan import ConversionPlan, PipelineKind, create_conversion_plan
 from de_dolby.probe import FileInfo, probe
 from de_dolby.progress import (
-    ProgressReporter, STEPS_LOSSLESS, STEPS_REENCODE,
+    ProgressReporter, Step, STEPS_LOSSLESS, STEPS_REENCODE,
     effective_progress_duration, run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
-    check_encoder_available, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
+    check_encoder_available, require_hdr10plus_tool, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
 from de_dolby.validation import validate_staged_output
 
 
 @dataclass
 class ConvertOptions:
+    hdr10plus: str = "off"
     encoder: str = "auto"       # auto, hevc_amf, libx265, av1_amf, libsvtav1, copy
     quality: str = "balanced"   # fast, balanced, quality
     crf: int | None = None
@@ -193,6 +195,24 @@ def _step_remux_encoded(ctx: PipelineContext) -> None:
     )
 
 
+def _step_hdr10plus(ctx: PipelineContext) -> None:
+    assert ctx.plan is not None
+    if ctx.plan.pipeline is PipelineKind.LOSSLESS_RPU_STRIP:
+        ctx.clean_path = prepare_video(ctx.clean_path, ctx.tmp_dir, ctx.plan.hdr10plus)
+    else:
+        ctx.encoded_path = prepare_video(ctx.encoded_path, ctx.tmp_dir, ctx.plan.hdr10plus)
+
+
+def _hdr10plus_steps(steps, labels, plan):
+    if plan is None or plan.hdr10plus == "off":
+        return steps, list(labels)
+    index = next(i for i, step in enumerate(steps) if step[0] == "remux")
+    steps.insert(index, ("hdr10plus", "", _step_hdr10plus))
+    labels = list(labels)
+    labels.insert(index, Step("hdr10plus", "Preparing HDR10+ dynamic metadata"))
+    return steps, labels
+
+
 def _step_cleanup(ctx: PipelineContext) -> None:
     _cleanup_temp(ctx.tmp_dir)
 
@@ -223,6 +243,8 @@ def _plan_from_info(
     info: FileInfo, output_path: str, options: ConvertOptions
 ) -> ConversionPlan:
     """Add probed encoder availability to pure planning inputs."""
+    if options.hdr10plus != "off":
+        require_hdr10plus_tool()
     available: set[str] = set()
     if info.video_streams:
         codec = get_input_codec(info.video_streams[0].codec_name)
@@ -238,6 +260,7 @@ def _plan_from_info(
                 available.add(options.encoder)
     return create_conversion_plan(
         info, output_path,
+        hdr10plus=options.hdr10plus,
         requested_encoder=options.encoder,
         available_encoders=available,
         sample_seconds=options.sample_seconds,
@@ -262,6 +285,8 @@ def execute_conversion_plan(
         mode_str = "Lossless RPU strip (no re-encode)"
     else:
         mode_str = f"Re-encode to {encoder.codec_family.upper()} (Profile {plan.profile})"
+    if plan.hdr10plus != "off":
+        mode_str += f"; HDR10+ {plan.hdr10plus}"
 
     display_banner(info, plan.output_path, plan.encoder, mode_str,
                    sample_seconds=options.sample_seconds)
@@ -299,6 +324,9 @@ def execute_conversion_plan(
                     for issue in report.errors
                 )
                 raise RuntimeError(f"Output validation failed: {details}")
+        if plan.hdr10plus != "off" and options.unsafe_skip_validation:
+            with tempfile.TemporaryDirectory(prefix="de_dolby_verify_", dir=options.temp_dir) as directory:
+                verify_metadata(staging_path, directory)
         output.publish()
 
 
@@ -333,7 +361,8 @@ def _run_lossless(info: FileInfo, input_codec: InputCodec,
         ("cleanup",      "",          _step_cleanup),
     ]
 
-    progress = ProgressReporter(STEPS_LOSSLESS, verbose=options.verbose)
+    steps, labels = _hdr10plus_steps(steps, STEPS_LOSSLESS, plan)
+    progress = ProgressReporter(labels, verbose=options.verbose)
     _run_pipeline(steps, progress, ctx)
 
 
@@ -384,6 +413,8 @@ def _run_reencode(info: FileInfo, input_codec: InputCodec, encoder: Encoder,
         ("cleanup",      "",          _step_cleanup),
     ]
 
+    steps, labels = _hdr10plus_steps(steps, STEPS_REENCODE, plan)
+    progress.steps = labels
     _run_pipeline(steps, progress, ctx)
 
 

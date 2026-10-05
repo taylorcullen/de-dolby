@@ -245,6 +245,43 @@ JSON reports use schema version 1. Each issue has a stable `code`, `severity`,
 diagnosis when a known ffprobe limitation causes a false failure; it can
 publish malformed output and should not be used routinely.
 
+### HDR10+ output
+
+HDR10+ is optional; normal conversions retain their existing behavior. Install
+[`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) on
+`PATH`, or pass `--hdr10plus-tool PATH` to `convert` or `plan`.
+
+```bash
+# Keep HDR10+ already present in a Dolby Vision/HDR10+ hybrid (HEVC profile 7/8)
+de-dolby convert movie.mkv --hdr10plus preserve
+
+# Generate experimental HDR10+ Profile A from the converted HDR10 video
+de-dolby convert movie.mkv --hdr10plus generate
+de-dolby plan movie.mkv --hdr10plus generate --json
+```
+
+Automatic filenames use `.HDR10Plus.mkv`. `preserve` verifies existing metadata
+and fails if none is found; it requires the lossless HEVC route. `generate`
+supports HEVC output, including re-encoded profile 5, and requires an FFmpeg
+build with the `zscale` filter. AV1/profile 10 is currently unsupported for
+HDR10+ output. Sample conversions measure only the converted sample.
+
+**Generation is experimental.** It decodes every output frame and measures a
+64×36 point-sampled PQ/BT.2020 image to generate Profile A brightness statistics.
+Sampling can miss small bright highlights. It does not reproduce Dolby Vision
+creative trims, reconstruct a profile 7 enhancement layer, generate a Profile B
+Bezier tone-mapping curve, or produce HDR10+ Advanced. Picture quality and TV
+recognition have not been verified on a physical HDR10+ display. Generation
+adds a full decode/analysis pass and intermediate storage, even on the otherwise
+lossless video route; it does not re-encode that route's picture.
+
+The output is checked with `hdr10plus_tool` before publication, including when
+standard validation is bypassed. In the TUI, set `hdr10plus=preserve` or
+`hdr10plus=generate` in Details & settings, then re-plan the item. Configuration
+presets also accept `hdr10plus = "generate"`, `"preserve"`, or `"off"`. HDR10+
+playback needs a compatible player as well as a compatible TV; Shield TV Pro
+outputs standard HDR10 for these files.
+
 ### Quality control
 
 During re-encoding, the progress line shows percentage, frame rate, FFmpeg

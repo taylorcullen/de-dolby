@@ -359,7 +359,7 @@ def test_plan_json_command_renders_versioned_document(
 ):
     assert _run_main("plan", "movie.DV.mkv", "--json") == 0
     document = json.loads(capsys.readouterr().out)
-    assert document["schema_version"] == 3
+    assert document["schema_version"] == 4
     assert document["pipeline"] == "lossless_rpu_strip"
     assert document["input_path"] == "movie.DV.mkv"
     assert document["output_path"] == "movie.HDR10.mkv"
@@ -444,4 +444,5 @@ bitrate = "40M"
     assert set(document) == {
         "encoder", "quality", "crf", "bitrate", "sample_seconds",
         "temp_dir", "timeout_minutes", "unsafe_skip_validation",
+        "hdr10plus",
     }

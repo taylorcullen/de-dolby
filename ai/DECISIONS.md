@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-10-05 — Wait for TUI message processing in keyboard tests
+
+Headless keyboard tests use `pilot.pause()` after interactions that rebuild
+widgets asynchronously, and assert the expected focus before the next input.
+Key delivery alone does not guarantee that the preceding submission handler
+has completed; immediate subsequent shortcuts can race its focus changes on
+CI runners. Keep these waits tied to UI processing rather than fixed sleeps.
+
 ## 2026-10-05 — Preserve embedded chapters using mkvmerge defaults
 
 Full conversions leave chapter copying enabled on the MKV source input;

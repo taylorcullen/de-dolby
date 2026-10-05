@@ -27,6 +27,11 @@
 - `de_dolby/utils.py` contains small shared utilities.
 - `de_dolby/validation.py` defines post-conversion invariants, stable issue
   codes, and versioned validation reports.
+- `de_dolby/tui_models.py`, `tui_paths.py`, and `tui_queue.py` contain the
+  dependency-light interactive queue model, network-path semantics, atomic
+  persistence, and sequential execution adapter.
+- `de_dolby/tui_app.py` is the optional Textual presentation layer, loaded only
+  by `de-dolby tui`.
 
 Keep policy and orchestration in the pipeline layer and operating-system
 process details in the tools layer. Tests should mock at that boundary.

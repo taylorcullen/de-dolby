@@ -99,6 +99,25 @@
       "status": "done",
       "prd": "ai/prds/DD-010-ralph-lifecycle.md",
       "depends_on": []
+    },
+    {
+      "id": "DD-011",
+      "title": "Conversion step ETA",
+      "priority": 11,
+      "status": "done",
+      "prd": "ai/prds/DD-011-conversion-eta.md",
+      "depends_on": []
+    },
+    {
+      "id": "DD-012",
+      "title": "Interactive conversion queue TUI",
+      "priority": 12,
+      "status": "done",
+      "prd": "ai/prds/DD-012-queue-tui.md",
+      "depends_on": [
+        "DD-006",
+        "DD-008"
+      ]
     }
   ]
 }

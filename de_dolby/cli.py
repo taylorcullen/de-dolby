@@ -213,6 +213,13 @@ def main() -> None:
     p_config_show.add_argument("--json", action="store_true",
                                help="Output machine-readable JSON")
 
+    p_tui = sub.add_parser("tui", help="Open the interactive conversion queue")
+    p_tui.add_argument(
+        "--queue",
+        metavar="PATH",
+        help="Queue state path (default: platform application-data directory)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -246,6 +253,13 @@ def main() -> None:
             p_config.print_help()
             sys.exit(2)
         _cmd_config_show(args)
+    elif args.command == "tui":
+        from de_dolby.tui import launch_tui
+        try:
+            launch_tui(args.queue)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
 
 
 def _cmd_plan(args: argparse.Namespace) -> None:

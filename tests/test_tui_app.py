@@ -2,6 +2,8 @@ import asyncio
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from textual.widgets import ContentSwitcher, Input
 
 from de_dolby.tui_app import DolbyQueueApp
@@ -11,6 +13,14 @@ from de_dolby.tui_queue import QueueBackend, QueueStore
 
 def run(coro):
     return asyncio.run(coro)
+
+
+async def wait_for_ui(pilot, condition, description, timeout=3):
+    """Wait for observable state, including messages queued by async handlers."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, f"Timed out waiting for {description}"
+        await pilot.pause()
 
 
 def backend(tmp_path):
@@ -25,32 +35,54 @@ def backend(tmp_path):
     )
 
 
-def test_tui_add_plan_reorder_remove_and_exit(tmp_path):
+@pytest.mark.parametrize("refresh_delay", [0, 0.1], ids=["normal", "slow-widget-mount"])
+def test_tui_add_plan_reorder_remove_and_exit(tmp_path, refresh_delay):
     async def scenario():
         app = DolbyQueueApp(backend=backend(tmp_path))
+        if refresh_delay:
+            refresh_queue = app.refresh_queue
+
+            async def delayed_refresh():
+                # Force the gap between model mutation and focus restoration
+                # that slower CI runners expose during async widget mounting.
+                await asyncio.sleep(refresh_delay)
+                await refresh_queue()
+
+            app.refresh_queue = delayed_refresh
         async with app.run_test(size=(120, 40)) as pilot:
             path_input = app.query_one("#path-input", Input)
+            await wait_for_ui(pilot, lambda: path_input.has_focus, "initial path focus")
             path_input.value = "first.DV.mkv"
             await pilot.press("enter")
-            await pilot.pause()
+            await wait_for_ui(pilot, lambda: len(app.backend.model.items) == 1
+                              and app.query_one("#queue-list").has_focus,
+                              "first file submission and queue focus")
             assert len(app.backend.model.items) == 1
             assert app.query_one("#queue-list").has_focus
             await pilot.press("a")
-            await pilot.pause()
+            await wait_for_ui(pilot, lambda: path_input.has_focus, "add-path focus")
             assert path_input.has_focus
             path_input.value = "second.DV.mkv"
             await pilot.press("enter")
-            await pilot.pause()
+            await wait_for_ui(pilot, lambda: len(app.backend.model.items) == 2
+                              and app.query_one("#queue-list").has_focus,
+                              "second file submission and queue focus")
             assert len(app.backend.model.items) == 2
 
             await pilot.press("p")
-            await pilot.pause()
+            await wait_for_ui(pilot, lambda: app.backend.model.selected.status is QueueStatus.READY
+                              and app.query_one("#queue-list").has_focus,
+                              "planning completion and queue focus")
             assert app.backend.model.selected.status is QueueStatus.READY
             await pilot.press("ctrl+down")
-            await pilot.pause()
+            await wait_for_ui(pilot, lambda: app.backend.model.selected_index == 1
+                              and app.query_one("#queue-list").has_focus,
+                              "queue reordering and focus")
             assert app.backend.model.selected_index == 1
             await pilot.press("delete")
-            await pilot.pause()
+            await wait_for_ui(pilot, lambda: len(app.backend.model.items) == 1
+                              and app.query_one("#queue-list").has_focus,
+                              "item removal and queue focus")
             assert len(app.backend.model.items) == 1
             await pilot.press("q")
     run(scenario())

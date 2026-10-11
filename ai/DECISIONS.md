@@ -28,6 +28,10 @@ plain HDR10 and HDR10+ output. Default conversion behavior remains unchanged.
 
 Headless keyboard tests use `pilot.pause()` after interactions that rebuild
 widgets asynchronously, and assert the expected focus before the next input.
+For submission and rebuild transitions, poll the observable state and focus
+with a bounded timeout: a single pause can finish while an async handler is
+still awaiting widget mounting, especially on Windows runners. Do not remove
+focus assertions or replace them with unconditional sleeps.
 Key delivery alone does not guarantee that the preceding submission handler
 has completed; immediate subsequent shortcuts can race its focus changes on
 CI runners. Keep these waits tied to UI processing rather than fixed sleeps.

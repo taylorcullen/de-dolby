@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#interactive-terminal-queue">TUI Guide</a> &bull;
   <a href="#usage">Usage</a> &bull;
   <a href="#encoders">Encoders</a> &bull;
   <a href="#installation">Installation</a> &bull;
@@ -37,12 +38,13 @@ python -m harness check         # run product and harness quality gates
 
 Unit tests do not require external media binaries and exclude integration
 tests by default. To run the hermetic media suite locally, install `ffmpeg`,
-`ffprobe`, and `mkvmerge`, ensure they are on `PATH`, then run:
+`ffprobe`, `mkvmerge`, and `hdr10plus_tool`, ensure they are on `PATH`, then run:
 
 ```bash
 ffmpeg -version
 ffprobe -version
 mkvmerge --version
+hdr10plus_tool --version
 python -m pytest -m integration -v
 ```
 
@@ -65,7 +67,7 @@ de-dolby convert movie.mkv
 
 That's it. de-dolby auto-detects the DV profile, picks the best GPU encoder, and outputs an HDR10 MKV.
 
-### Interactive terminal queue
+## Interactive terminal queue
 
 Install the optional Textual interface and launch it with:
 
@@ -74,18 +76,103 @@ pip install -e ".[tui]"
 de-dolby tui
 ```
 
+Install the [external tools](#installation) too: the interface uses the same
+conversion pipeline as the CLI. For default lossless HDR10+ detection,
+`hdr10plus_tool` must be on `PATH`. A wide terminal makes the queue and details
+easier to read; smaller windows stack the panes vertically.
+
+The screenshots below are captured from the actual TUI with example paths,
+plans, and progress. They do not show a real conversion or access a NAS.
+
+### 1. Add files or browse your NAS
+
+Press `a`, paste a single MKV path into the left input, and press `Enter`.
+Paste the path without surrounding quotes, even if it contains spaces.
+Repeat to build your queue. Duplicate paths are skipped.
+
+For a folder of episodes, press `2` to open **Browser**, focus the directory
+input with `Tab` or a click, enter a folder path, and press `Enter`.
+Use the arrow keys to move through the listing. `Enter` opens a directory or
+adds a file; `Space` marks or unmarks a file. Press `Shift+A` to add the marked
+files. If nothing is marked, it adds all visible files in the current folder.
+
+![TUI Browser showing a NAS folder with two episodes marked for the queue](docs/images/tui-browser.svg)
+
 The TUI can browse local folders, Windows UNC shares such as
 `\\server\share\media`, mapped drives, and SMB/NFS shares mounted by the
 operating system. It does not mount shares or store credentials. Slow,
 unavailable, or permission-denied network locations are reported without
 blocking the interface.
 
-Use `a` to add a path, `Delete` to remove, `Ctrl+Up`/`Ctrl+Down` to reorder,
-`p` to review a plan, `s` to start the sequential queue, `c` to cancel the
-active conversion, and `r` to retry an interrupted or failed item. Press `?`
-for the complete in-app key reference. Queue state is saved under the platform
-application-data directory by default; use `de-dolby tui --queue PATH` for an
-explicit state file.
+### 2. Review the plan and adjust settings
+
+Focus the queue, use the arrow keys and `Enter` to select an item, then press
+`p` to plan it. Press `3` to see **Details & settings**: source, destination,
+status, pipeline, encoder, and any planning error. A successful plan marks
+the item `ready`.
+
+![TUI Details showing a lossless plan that preserves native HDR10+ and a sample setting ready to enter](docs/images/tui-details.svg)
+
+Press `e` to focus the settings input, type one `key=value` setting, and press
+`Enter` to apply it to the selected item. For example:
+
+| Setting | Effect |
+|:--------|:-------|
+| `sample_seconds=30` | Convert the first 30 seconds for a quick playback check. |
+| `hdr10plus=auto` | Default: preserve and verify native HDR10+ on the lossless HEVC route. |
+| `hdr10plus=preserve` | Require existing HDR10+; fail if it is absent. |
+| `hdr10plus=generate` | Generate experimental Profile A metadata; adds analysis time. |
+| `hdr10plus=off` | Skip the additional HDR10+ checks. |
+| `encoder=libx265` | Request a CPU HEVC re-encode instead of automatic selection. |
+| `quality=quality` | Use the quality preset when re-encoding. |
+
+Changing a setting clears the previous plan and returns the item to `pending`.
+Press `p` again to review the new plan before starting. The quality preset
+does not change the picture on the lossless copy route. See
+[HDR10+ output](#hdr10-output) for generation limitations.
+
+### 3. Run the queue and watch progress
+
+Press `s` to start. Files convert one at a time, in queue order. Press `5`
+for **Active conversion**, which shows the current file, percentage, and ETA.
+The left queue also updates as the conversion runs.
+
+![TUI Active conversion showing illustrative progress of 62.5 percent and an 18 second ETA](docs/images/tui-progress.svg)
+
+Press `4` for **Logs** to inspect conversion messages or failures. Press `c`
+to cancel the active conversion. Select a failed or interrupted item and press
+`r` to return it to `pending`, then `p` to review its plan and `s` to run it
+again. Existing output files are protected by the same overwrite rules as
+the CLI.
+
+### Keyboard reference and saved queues
+
+These shortcuts work when a text input is not focused. Use `Tab` or click
+the queue/list to leave an input; letters typed into an input are text.
+
+| Key | Action |
+|:----|:-------|
+| `1` / `2` / `3` / `4` / `5` | Queue / Browser / Details / Logs / Progress |
+| `a` | Focus the input for adding a file |
+| `Delete` | Remove the selected queue item |
+| `Ctrl+Up` / `Ctrl+Down` | Move the selected item earlier / later |
+| `p` / `e` | Plan the selected item / edit its settings |
+| `s` / `c` / `r` | Start the queue / cancel the active conversion / retry |
+| `Space` / `Shift+A` | Mark a browser file / add marked or visible files |
+| `?` / `q` | Show in-app help / quit |
+
+Queue state is saved automatically under the platform application-data
+directory (`%APPDATA%\de-dolby\queue.json` on Windows). Reopen the TUI to
+recover the queue; items that were running are restored as `interrupted`.
+For a separate queue, supply a state-file path:
+
+```bash
+de-dolby tui --queue living-room-queue.json
+```
+
+Contributors can refresh these screenshots with
+`python docs/capture_tui.py` after installing `.[tui]`. The script uses
+synthetic data and runs no video tools or conversions.
 
 ---
 

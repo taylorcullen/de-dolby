@@ -54,6 +54,12 @@ the harness can be reviewed, tested, and evolved alongside product features.
 
 ## Extending the harness
 
+README TUI screenshots can be refreshed with `python docs/capture_tui.py`
+after installing `.[tui]`. The script renders the real Textual interface with
+synthetic paths, plans, and progress; it runs no media tools and persists its
+example queue only in a temporary directory. Keep screenshots and the README
+walkthrough aligned when changing TUI views or shortcuts.
+
 Add a gate to `ai/harness.json` when it is deterministic, works from the
 repository root, and gives a useful failure message. Add corresponding coverage
 in `harness_tests/`. Keep provider-specific prompts and private state outside

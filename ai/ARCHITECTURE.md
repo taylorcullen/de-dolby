@@ -23,6 +23,8 @@
 - `de_dolby/plan.py` models immutable conversion plans and owns pure route and
   encoder-selection policy.
 - `de_dolby/pipeline.py` plans and executes conversion pipelines.
+  It resolves default HDR10+ automatic mode with a read-only tool presence
+  check before recording either preserve or off in the immutable plan.
 - `de_dolby/tools.py` is the subprocess boundary for external media tools.
 - `de_dolby/process.py` owns the common process-runner interface and typed
   failure, timeout, and cancellation taxonomy.

@@ -19,6 +19,45 @@ def info(profile=8, codec="hevc"):
     )
 
 
+@pytest.mark.parametrize("present,mode", [(True, "preserve"), (False, "off")])
+def test_default_auto_resolves_native_metadata_without_first_frame_side_data(present, mode):
+    from de_dolby.pipeline import ConvertOptions, _plan_from_info
+    with patch("de_dolby.pipeline.detect_hdr10plus", return_value=present) as detect, patch("de_dolby.pipeline.require_hdr10plus_tool"):
+        plan = _plan_from_info(info(), "out.mkv", ConvertOptions())
+    detect.assert_called_once_with("source.mkv")
+    assert plan.hdr10plus == mode
+    assert merge_settings().hdr10plus == "auto"
+    assert derive_output_name("movie.mkv", "auto") == "movie.HDR10.mkv"
+
+
+def test_auto_reencode_does_not_generate_or_probe_native_metadata():
+    from de_dolby.pipeline import ConvertOptions, _plan_from_info
+    with patch("de_dolby.pipeline.detect_hdr10plus") as detect, patch("de_dolby.pipeline.check_encoder_available", return_value=True):
+        plan = _plan_from_info(info(profile=5), "out.mkv", ConvertOptions())
+    detect.assert_not_called()
+    assert plan.hdr10plus == "off"
+
+
+@pytest.mark.parametrize("code,stdout,stderr,expected", [
+    (0, b"Dynamic HDR10+ metadata detected.", b"", True),
+    (1, b"", b"Error: File doesn't contain dynamic metadata", False),
+])
+def test_presence_detection_has_no_output_file(code, stdout, stderr, expected):
+    from subprocess import CompletedProcess
+    from de_dolby.tools import detect_hdr10plus
+    with patch("de_dolby.tools.require_hdr10plus_tool"), patch("de_dolby.tools._run", return_value=CompletedProcess([], code, stdout, stderr)) as run:
+        assert detect_hdr10plus("movie.mkv") is expected
+    assert run.call_args.args[0][1:] == ["--verify", "extract", "movie.mkv"]
+
+
+def test_presence_detection_propagates_unexpected_tool_failure():
+    from subprocess import CompletedProcess
+    from de_dolby.tools import detect_hdr10plus
+    with patch("de_dolby.tools.require_hdr10plus_tool"), patch("de_dolby.tools._run", return_value=CompletedProcess([], 1, b"", b"Input file doesn't exist")):
+        with pytest.raises(RuntimeError, match="Could not detect"):
+            detect_hdr10plus("movie.mkv")
+
+
 @pytest.mark.parametrize("value,expected", [(0, 0), (1, 10000), (0.5080784215, 100)])
 def test_pq_eotf_reference_values(value, expected):
     assert pq_to_nits(value) == pytest.approx(expected, abs=0.0001)

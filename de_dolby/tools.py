@@ -181,6 +181,18 @@ def run_hdr10plus_tool(args: list[str]) -> subprocess.CompletedProcess:
     return _run([_paths.hdr10plus_tool] + args)
 
 
+def detect_hdr10plus(path: str) -> bool:
+    """Check native metadata without writing files; propagate tool failures."""
+    require_hdr10plus_tool()
+    result = _run([_paths.hdr10plus_tool, "--verify", "extract", path], check=False)
+    output = (result.stdout or b"") + (result.stderr or b"")
+    if result.returncode == 0 and b"Dynamic HDR10+ metadata detected" in output:
+        return True
+    if result.returncode == 1 and b"File doesn't contain dynamic metadata" in output:
+        return False
+    raise RuntimeError(f"Could not detect HDR10+ metadata: {output.decode(errors='replace').strip()}")
+
+
 def require_tools(need_mkvmerge: bool = True) -> None:
     """Check that all required tools are on PATH, exit with error if not."""
     status = check_tools()

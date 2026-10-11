@@ -23,14 +23,14 @@ from de_dolby.progress import (
     effective_progress_duration, run_ffmpeg_with_progress,
 )
 from de_dolby.tools import (
-    check_encoder_available, require_hdr10plus_tool, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
+    check_encoder_available, detect_hdr10plus, require_hdr10plus_tool, run_dovi_tool, run_ffmpeg, run_mkvmerge, set_verbose,
 )
 from de_dolby.validation import validate_staged_output
 
 
 @dataclass
 class ConvertOptions:
-    hdr10plus: str = "off"
+    hdr10plus: str = "auto"
     encoder: str = "auto"       # auto, hevc_amf, libx265, av1_amf, libsvtav1, copy
     quality: str = "balanced"   # fast, balanced, quality
     crf: int | None = None
@@ -243,7 +243,13 @@ def _plan_from_info(
     info: FileInfo, output_path: str, options: ConvertOptions
 ) -> ConversionPlan:
     """Add probed encoder availability to pure planning inputs."""
-    if options.hdr10plus != "off":
+    hdr10plus = options.hdr10plus
+    if hdr10plus == "auto":
+        hdr10plus = "off"
+        if (info.video_streams and info.video_streams[0].codec_name == "hevc"
+                and info.dv_profile in (7, 8) and options.encoder in ("auto", "copy")):
+            hdr10plus = "preserve" if detect_hdr10plus(info.path) else "off"
+    if hdr10plus != "off":
         require_hdr10plus_tool()
     available: set[str] = set()
     if info.video_streams:
@@ -260,7 +266,7 @@ def _plan_from_info(
                 available.add(options.encoder)
     return create_conversion_plan(
         info, output_path,
-        hdr10plus=options.hdr10plus,
+        hdr10plus=hdr10plus,
         requested_encoder=options.encoder,
         available_encoders=available,
         sample_seconds=options.sample_seconds,

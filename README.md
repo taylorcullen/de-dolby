@@ -247,9 +247,14 @@ publish malformed output and should not be used routinely.
 
 ### HDR10+ output
 
-HDR10+ is optional; normal conversions retain their existing behavior. Install
+The default `--hdr10plus auto` detects and verifies native HDR10+ on the
+lossless HEVC profile 7/8 route. Files without native metadata produce standard
+HDR10; automatic mode never generates replacement metadata. Install
 [`hdr10plus_tool`](https://github.com/quietvoid/hdr10plus_tool/releases) on
 `PATH`, or pass `--hdr10plus-tool PATH` to `convert` or `plan`.
+Like FFmpeg, the tool resolves by name on `PATH`; no explicit path is needed.
+Use `--hdr10plus off` to skip these checks. Re-encoding does not automatically
+preserve dynamic metadata.
 
 ```bash
 # Keep HDR10+ already present in a Dolby Vision/HDR10+ hybrid (HEVC profile 7/8)
@@ -260,7 +265,9 @@ de-dolby convert movie.mkv --hdr10plus generate
 de-dolby plan movie.mkv --hdr10plus generate --json
 ```
 
-Automatic filenames use `.HDR10Plus.mkv`. `preserve` verifies existing metadata
+Default automatic filenames use `.HDR10.mkv`, which may also contain native
+HDR10+. Explicit `preserve` and `generate` use `.HDR10Plus.mkv`.
+`preserve` verifies existing metadata
 and fails if none is found; it requires the lossless HEVC route. `generate`
 supports HEVC output, including re-encoded profile 5, and requires an FFmpeg
 build with the `zscale` filter. AV1/profile 10 is currently unsupported for
@@ -278,7 +285,7 @@ lossless video route; it does not re-encode that route's picture.
 The output is checked with `hdr10plus_tool` before publication, including when
 standard validation is bypassed. In the TUI, set `hdr10plus=preserve` or
 `hdr10plus=generate` in Details & settings, then re-plan the item. Configuration
-presets also accept `hdr10plus = "generate"`, `"preserve"`, or `"off"`. HDR10+
+presets also accept `hdr10plus = "auto"`, `"generate"`, `"preserve"`, or `"off"`. HDR10+
 playback needs a compatible player as well as a compatible TV; Shield TV Pro
 outputs standard HDR10 for these files.
 

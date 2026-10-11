@@ -1,5 +1,14 @@
 # Decision log
 
+## 2026-10-11 — Prefer native HDR10+ by default
+
+Automatic mode checks lossless HEVC profile 7/8 sources with
+`hdr10plus_tool --verify extract`, since first-frame FFprobe side data can
+miss native metadata. Native metadata is preserved and verified; absence
+selects ordinary HDR10. Tool errors fail clearly. Re-encoding and experimental
+generation remain explicit choices. Automatic filenames retain HDR10 naming
+because they are selected before source detection. Tools resolve on PATH.
+
 ## 2026-10-05 — Make HDR10+ generation explicit and experimental
 
 `hdr10plus=preserve` verifies existing metadata on the lossless HEVC route.

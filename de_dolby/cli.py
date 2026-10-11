@@ -75,7 +75,7 @@ def derive_output_name(input_path: str, hdr10plus: str = "off") -> str:
         '2x03 - Secrets.DV.mkv'  -> '2x03 - Secrets.HDR10.mkv'
         '2x03 - Secrets.mkv'     -> '2x03 - Secrets.HDR10.mkv'
     """
-    if hdr10plus != "off":
+    if hdr10plus in ("preserve", "generate"):
         normal = derive_output_name(input_path)
         suffix = Path(input_path).suffix
         stem = normal[:-len(suffix)] if suffix else normal
@@ -136,8 +136,8 @@ def main() -> None:
         "--unsafe-skip-validation", action="store_true", default=None,
         help="UNSAFE: publish output without post-conversion validation",
     )
-    p_convert.add_argument("--hdr10plus", choices=["off", "preserve", "generate"], default=None,
-                           help="HDR10+ mode: preserve existing metadata or generate experimental Profile A")
+    p_convert.add_argument("--hdr10plus", choices=["auto", "off", "preserve", "generate"], default=None,
+                           help="HDR10+ mode: auto preserves native metadata on the lossless route (default); generate is experimental")
     p_convert.add_argument("--hdr10plus-tool", help="Path to hdr10plus_tool binary")
     p_convert.add_argument("--ffmpeg", help="Path to ffmpeg binary")
     p_convert.add_argument("--dovi-tool", help="Path to dovi_tool binary")
@@ -196,7 +196,7 @@ def main() -> None:
     p_plan.add_argument("--json", action="store_true",
                         help="Output the versioned plan JSON schema")
     p_plan.add_argument("--ffmpeg", help="Path to ffmpeg binary")
-    p_plan.add_argument("--hdr10plus", choices=["off", "preserve", "generate"], default=None)
+    p_plan.add_argument("--hdr10plus", choices=["auto", "off", "preserve", "generate"], default=None)
     p_plan.add_argument("--hdr10plus-tool", help="Path to hdr10plus_tool binary")
 
     # validate subcommand

@@ -233,10 +233,11 @@ def _conversion_info(profile=7, codec="hevc"):
     )
 
 
+@patch("de_dolby.pipeline.detect_hdr10plus", return_value=False)
 @patch("de_dolby.pipeline.execute_conversion_plan")
 @patch("de_dolby.pipeline.Path.exists", return_value=False)
 @patch("de_dolby.pipeline.probe")
-def test_convert_passes_immutable_plan_to_executor(mock_probe, exists, execute):
+def test_convert_passes_immutable_plan_to_executor(mock_probe, exists, execute, detect):
     info = _conversion_info()
     mock_probe.return_value = info
 

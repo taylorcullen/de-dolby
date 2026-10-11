@@ -74,6 +74,11 @@ async def capture():
             app.action_show_view("progress")
             await pilot.pause()
             app.save_screenshot("tui-progress.svg", path=str(OUTPUT))
+    for name in ("browser", "details", "progress"):
+        screenshot = OUTPUT / f"tui-{name}.svg"
+        screenshot.write_text("\n".join(
+            line.rstrip() for line in screenshot.read_text(encoding="utf-8").splitlines()
+        ) + "\n", encoding="utf-8")
     print(f"Saved three TUI screenshots to {OUTPUT}")
 
 

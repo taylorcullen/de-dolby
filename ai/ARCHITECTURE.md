@@ -13,6 +13,9 @@
 - `de_dolby/settings.py` loads versioned user configuration and resolves typed
   conversion settings using defaults, named presets, and CLI precedence.
 - `de_dolby/metadata.py` derives HDR10 metadata.
+- `de_dolby/hdr10plus.py` verifies preserved HEVC HDR10+ metadata and owns
+  experimental sampled-pixel Profile A generation and injection. It analyses
+  converted HDR10 pixels rather than translating Dolby Vision RPU values.
 - `de_dolby/manifest.py` owns versioned resumable-batch state, identities,
   fingerprints, and atomic persistence.
 - `de_dolby/output.py` owns sibling staging files and atomic output
@@ -20,6 +23,8 @@
 - `de_dolby/plan.py` models immutable conversion plans and owns pure route and
   encoder-selection policy.
 - `de_dolby/pipeline.py` plans and executes conversion pipelines.
+  It resolves default HDR10+ automatic mode with a read-only tool presence
+  check before recording either preserve or off in the immutable plan.
 - `de_dolby/tools.py` is the subprocess boundary for external media tools.
 - `de_dolby/process.py` owns the common process-runner interface and typed
   failure, timeout, and cancellation taxonomy.

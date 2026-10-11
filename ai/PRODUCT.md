@@ -14,7 +14,8 @@ Its important user promises are:
 - Existing outputs are not overwritten unless the user opts in.
 
 The CLI depends on `ffmpeg`/`ffprobe`, `dovi_tool`, and `mkvmerge` for real
-conversions. Unit tests must not depend on those binaries being installed.
+conversions, and `hdr10plus_tool` for default lossless HDR10+ detection and
+verification. Unit tests must not depend on those binaries being installed.
 
 See `README.md` for supported commands and end-user documentation.
 

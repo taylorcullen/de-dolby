@@ -61,5 +61,29 @@ jobs:
           ffprobe -version | head -n 1
           mkvmerge --version
 
+      - name: Install HDR10+ metadata tool
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, io, os, pathlib, tarfile, urllib.request
+          name = "hdr10plus_tool-1.7.2-x86_64-unknown-linux-musl.tar.gz"
+          url = "https://github.com/quietvoid/hdr10plus_tool/releases/download/1.7.2/" + name
+          archive = urllib.request.urlopen(url).read()
+          checksum = urllib.request.urlopen(url + ".sha256").read().decode().split()[0]
+          assert hashlib.sha256(archive).hexdigest() == checksum, "HDR10+ download checksum mismatch"
+          directory = pathlib.Path(os.environ["RUNNER_TEMP"]) / "hdr10plus-bin"
+          directory.mkdir(exist_ok=True)
+          with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+              member = next(item for item in bundle.getmembers() if pathlib.PurePosixPath(item.name).name == "hdr10plus_tool" and item.isfile())
+              target = directory / "hdr10plus_tool"
+              target.write_bytes(bundle.extractfile(member).read())
+              target.chmod(0o755)
+          with open(os.environ["GITHUB_PATH"], "a") as output:
+              output.write(str(directory) + "\n")
+          PY
+
+      - name: Record HDR10+ tool version
+        run: hdr10plus_tool --version
+
       - name: Run hermetic media integration tests
         run: python -m pytest -m integration -v

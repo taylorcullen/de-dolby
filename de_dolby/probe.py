@@ -42,6 +42,7 @@ class FileInfo:
     dv_profile: int | None = None
     dv_bl_signal_compatibility_id: int | None = None
     has_hdr10: bool = False
+    has_hdr10plus: bool = False
     master_display: str | None = None  # ffmpeg format: G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)
     content_light_level: str | None = None  # "MaxCLL,MaxFALL"
     video_streams: list[StreamInfo] = field(default_factory=list)
@@ -170,7 +171,9 @@ def _extract_side_data(sd_list: list[dict], info: FileInfo, overwrite: bool = Tr
     for sd in sd_list:
         sd_type = sd.get("side_data_type")
 
-        if sd_type == "DOVI configuration record":
+        if sd_type == "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)":
+            info.has_hdr10plus = True
+        elif sd_type == "DOVI configuration record":
             if overwrite or info.dv_profile is None:
                 info.dv_profile = sd.get("dv_profile")
                 info.dv_bl_signal_compatibility_id = sd.get("dv_bl_signal_compatibility_id")

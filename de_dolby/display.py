@@ -133,6 +133,8 @@ def _build_info_rows(info: FileInfo, output_path: str | None = None,
 
     if info.has_hdr10:
         rows.append(("HDR10", "yes (base layer)"))
+    if info.has_hdr10plus:
+        rows.append(("HDR10+", "detected"))
 
     rows.append(("Audio", _stream_summary(info.audio_streams)))
     subs = _stream_summary(info.subtitle_streams)

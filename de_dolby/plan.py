@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 from typing import AbstractSet, Callable
 
 from de_dolby.codecs import ENCODERS, InputCodec, get_input_codec
 from de_dolby.probe import FileInfo
 
-PLAN_SCHEMA_VERSION = 3
+PLAN_SCHEMA_VERSION = 4
 
 
 class PipelineKind(str, Enum):
@@ -70,6 +71,7 @@ class ConversionPlan:
     warnings: tuple[str, ...]
     estimated_temp_bytes: int | None
     steps: tuple[str, ...]
+    hdr10plus: str = "off"
     quality: str = "balanced"
     crf: int | None = None
     bitrate: str | None = None
@@ -132,6 +134,7 @@ def create_conversion_plan(
     requested_encoder: str = "auto",
     available_encoders: AbstractSet[str] = frozenset(),
     sample_seconds: int | None = None,
+    hdr10plus: str = "off",
     quality: str = "balanced",
     crf: int | None = None,
     bitrate: str | None = None,
@@ -177,6 +180,17 @@ def create_conversion_plan(
             )
         if requested_encoder != "auto" and encoder not in available_encoders:
             raise RuntimeError(f"Encoder {encoder} is not available in ffmpeg")
+
+    if hdr10plus not in {"off", "preserve", "generate"}:
+        raise RuntimeError("Unsupported HDR10+ mode")
+    if hdr10plus != "off" and codec_family != "hevc":
+        raise RuntimeError("HDR10+ output currently supports HEVC only, not AV1")
+    if hdr10plus == "preserve" and pipeline is not PipelineKind.LOSSLESS_RPU_STRIP:
+        raise RuntimeError("HDR10+ preservation requires the lossless profile 7/8 route; use generate for re-encoding")
+    if hdr10plus != "off" and pipeline is PipelineKind.LOSSLESS_RPU_STRIP and not (
+        info.has_hdr10 or info.dv_bl_signal_compatibility_id == 1
+    ):
+        raise RuntimeError("HDR10+ requires an HDR10-compatible base layer")
 
     sampled = sample_seconds is not None
     stream_policy = StreamPolicy(
@@ -240,6 +254,24 @@ def create_conversion_plan(
             "encode", "remux", "cleanup",
         )
 
+    if hdr10plus != "off":
+        steps = steps[:-2] + ("hdr10plus",) + steps[-2:]
+    if hdr10plus == "generate":
+        warnings.append("Experimental HDR10+ Profile A: sampled pixel measurements; no Dolby Vision grade or Profile B tone-mapping curve")
+
+    estimated = _estimated_temp_bytes(info, sample_seconds)
+    if hdr10plus == "generate" and estimated is not None:
+        try:
+            fps = float(Fraction(info.video_streams[0].frame_rate or "0"))
+        except (ValueError, ZeroDivisionError):
+            fps = 0
+        if fps > 0:
+            duration = min(sample_seconds, info.duration) if sample_seconds else info.duration
+            # Two additional HEVC files plus sampled frames and per-frame JSON.
+            estimated += int(info.overall_bitrate * duration / 4 + fps * duration * 16384)
+        else:
+            estimated = None
+
     return ConversionPlan(
         input_path=info.path,
         output_path=output_path,
@@ -255,8 +287,9 @@ def create_conversion_plan(
         stream_policy=stream_policy,
         stream_map=tuple(stream_map),
         warnings=tuple(warnings),
-        estimated_temp_bytes=_estimated_temp_bytes(info, sample_seconds),
+        estimated_temp_bytes=estimated,
         steps=steps,
+        hdr10plus=hdr10plus,
         quality=quality,
         crf=crf,
         bitrate=bitrate,
@@ -277,6 +310,7 @@ def plan_document(plan: ConversionPlan) -> dict:
         "pipeline": plan.pipeline.value,
         "encoder": plan.encoder,
         "settings": {
+            "hdr10plus": plan.hdr10plus,
             "quality": plan.quality,
             "crf": plan.crf,
             "bitrate": plan.bitrate,

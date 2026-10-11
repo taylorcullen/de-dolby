@@ -19,6 +19,7 @@ class ToolPaths:
     ffprobe: str = "ffprobe"
     dovi_tool: str = "dovi_tool"
     mkvmerge: str = "mkvmerge"
+    hdr10plus_tool: str = "hdr10plus_tool"
 
 
 _paths = ToolPaths()
@@ -33,7 +34,7 @@ def set_verbose(enabled: bool) -> None:
 
 
 def configure(*, ffmpeg: str | None = None, dovi_tool: str | None = None,
-              mkvmerge: str | None = None) -> None:
+              mkvmerge: str | None = None, hdr10plus_tool: str | None = None) -> None:
     if ffmpeg:
         _paths.ffmpeg = ffmpeg
         # Derive ffprobe from same directory
@@ -44,6 +45,8 @@ def configure(*, ffmpeg: str | None = None, dovi_tool: str | None = None,
         _paths.dovi_tool = dovi_tool
     if mkvmerge:
         _paths.mkvmerge = mkvmerge
+    if hdr10plus_tool:
+        _paths.hdr10plus_tool = hdr10plus_tool
 
 
 _timeout_seconds: int | None = None
@@ -163,6 +166,31 @@ def run_dovi_tool(args: list[str], stdin_data: bytes | None = None) -> subproces
 
 def run_mkvmerge(args: list[str]) -> subprocess.CompletedProcess:
     return _run([_paths.mkvmerge] + args)
+
+
+def require_hdr10plus_tool() -> None:
+    if shutil.which(_paths.hdr10plus_tool) is None:
+        raise RuntimeError(
+            "HDR10+ output requires hdr10plus_tool; install it from "
+            "https://github.com/quietvoid/hdr10plus_tool/releases "
+            "or specify --hdr10plus-tool PATH"
+        )
+
+
+def run_hdr10plus_tool(args: list[str]) -> subprocess.CompletedProcess:
+    return _run([_paths.hdr10plus_tool] + args)
+
+
+def detect_hdr10plus(path: str) -> bool:
+    """Check native metadata without writing files; propagate tool failures."""
+    require_hdr10plus_tool()
+    result = _run([_paths.hdr10plus_tool, "--verify", "extract", path], check=False)
+    output = (result.stdout or b"") + (result.stderr or b"")
+    if result.returncode == 0 and b"Dynamic HDR10+ metadata detected" in output:
+        return True
+    if result.returncode == 1 and b"File doesn't contain dynamic metadata" in output:
+        return False
+    raise RuntimeError(f"Could not detect HDR10+ metadata: {output.decode(errors='replace').strip()}")
 
 
 def require_tools(need_mkvmerge: bool = True) -> None:

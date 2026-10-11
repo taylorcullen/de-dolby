@@ -60,6 +60,7 @@ class SubprocessQueueConverter:
             "-o", item.output_path or derive_output_name(item.input_path),
         ]
         option_flags = {
+            "hdr10plus": "--hdr10plus",
             "encoder": "--encoder",
             "quality": "--quality",
             "crf": "--crf",
@@ -245,6 +246,11 @@ class QueueBackend:
         self.persist()
         try:
             options = ConvertOptions(**item.settings)
+            if item.output_path in {
+                derive_output_name(item.input_path),
+                derive_output_name(item.input_path, "generate"),
+            }:
+                item.output_path = derive_output_name(item.input_path, options.hdr10plus)
             plan = self.planner(
                 item.input_path,
                 item.output_path or derive_output_name(item.input_path),
@@ -254,6 +260,11 @@ class QueueBackend:
                 f"{plan.pipeline.value} · {plan.encoder} · "
                 f"{len(plan.steps)} steps"
             )
+            mode = getattr(plan, "hdr10plus", "off")
+            if mode != "off":
+                item.plan_summary += f" · HDR10+ {mode}"
+                if mode == "generate":
+                    item.plan_summary += " (experimental Profile A)"
             try:
                 item.input_identity = asdict(identify_input(item.input_path))
                 item.plan_fingerprint = fingerprint_plan(plan)

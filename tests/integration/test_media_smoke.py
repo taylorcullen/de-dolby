@@ -103,3 +103,30 @@ def test_planned_source_remux_preserves_embedded_chapters(tmp_path):
     assert result.chapters[0].title == "Opening"
     assert result.chapters[0].start_time == info.chapters[0].start_time
     assert len(result.video_streams) == len(result.audio_streams) == 1
+
+
+def test_generated_hdr10plus_round_trips_through_mkv(tmp_path):
+    from de_dolby.hdr10plus import prepare_video, verify_metadata
+    from de_dolby.tools import configure, run_ffmpeg, run_mkvmerge
+
+    _tool("ffmpeg")
+    _tool("ffprobe")
+    _tool("mkvmerge")
+    tool = _tool("hdr10plus_tool")
+    configure(hdr10plus_tool=tool)
+    source = str(tmp_path / "source.hevc")
+    output = str(tmp_path / "output.mkv")
+    run_ffmpeg([
+        "-f", "lavfi", "-i", "testsrc2=size=128x72:rate=4:duration=1",
+        "-c:v", "libx265", "-pix_fmt", "yuv420p10le",
+        "-color_primaries", "bt2020", "-color_trc", "smpte2084",
+        "-colorspace", "bt2020nc", "-x265-params", "log-level=error",
+        "-f", "hevc", source,
+    ])
+    generated = prepare_video(source, str(tmp_path), "generate")
+    run_mkvmerge(["-o", output, generated])
+    data = verify_metadata(output, str(tmp_path))
+    assert data["JSONInfo"]["HDR10plusProfile"] == "A"
+    assert len(data["SceneInfo"]) == 4
+    assert all("BezierCurveData" not in frame for frame in data["SceneInfo"])
+    assert prepare_video(generated, str(tmp_path), "preserve") == generated

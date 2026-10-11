@@ -1,5 +1,29 @@
 # Decision log
 
+## 2026-10-11 — Prefer native HDR10+ by default
+
+Automatic mode checks lossless HEVC profile 7/8 sources with
+`hdr10plus_tool --verify extract`, since first-frame FFprobe side data can
+miss native metadata. Native metadata is preserved and verified; absence
+selects ordinary HDR10. Tool errors fail clearly. Re-encoding and experimental
+generation remain explicit choices. Automatic filenames retain HDR10 naming
+because they are selected before source detection. Tools resolve on PATH.
+
+## 2026-10-05 — Make HDR10+ generation explicit and experimental
+
+`hdr10plus=preserve` verifies existing metadata on the lossless HEVC route.
+`hdr10plus=generate` measures converted PQ/BT.2020 frames on a 64×36 point
+sample grid and emits Profile A with no fabricated Bezier curve or translation
+of Dolby Vision creative trims. HDR10+ histogram slots 5/10 carry Y99 and the
+percentage at or below 100 nits, while slot 99 carries maxRGB's 99.98 percentile.
+The small grid is an explicit approximation that can miss highlights; physical
+TV appearance is unverified. AV1 injection remains unsupported. Use
+`hdr10plus_tool` for injection and full metadata extraction before publication;
+an output explicitly requested as HDR10+ must never silently become HDR10.
+
+Plan schema 4 fingerprints the HDR10+ mode so resumable jobs cannot confuse
+plain HDR10 and HDR10+ output. Default conversion behavior remains unchanged.
+
 ## 2026-10-05 — Wait for TUI message processing in keyboard tests
 
 Headless keyboard tests use `pilot.pause()` after interactions that rebuild
